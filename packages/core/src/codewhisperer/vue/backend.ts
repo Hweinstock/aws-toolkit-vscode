@@ -11,9 +11,9 @@ import { VueWebview } from '../../webviews/main'
 import { isCloud9 } from '../../shared/extensionUtilities'
 import globals from '../../shared/extensionGlobals'
 import { telemetry, CodewhispererLanguage, CodewhispererGettingStartedTask } from '../../shared/telemetry/telemetry'
-import { fsCommon } from '../../srcShared/fs'
+import { fs } from '../../shared'
 import { getLogger } from '../../shared/logger'
-import { PromptSettings } from '../../shared/settings'
+import { AmazonQPromptSettings } from '../../shared/settings'
 import { CodeWhispererSource } from '../commands/types'
 import { submitFeedback } from '../../feedback/vue/submitFeedback'
 import { placeholder } from '../../shared/vscode/commands2'
@@ -39,10 +39,10 @@ export class CodeWhispererWebview extends VueWebview {
         const fileContent = name[1]
 
         const localFilePath = this.getLocalFilePath(fileName)
-        if ((await fsCommon.existsFile(localFilePath)) && this.isFileSaved) {
+        if ((await fs.existsFile(localFilePath)) && this.isFileSaved) {
             const fileUri = vscode.Uri.file(localFilePath)
-            await vscode.workspace.openTextDocument(fileUri).then(async doc => {
-                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active).then(editor => {
+            await vscode.workspace.openTextDocument(fileUri).then(async (doc) => {
+                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active).then((editor) => {
                     const endOfDocument = new vscode.Position(
                         doc.lineCount - 1,
                         doc.lineAt(doc.lineCount - 1).text.length
@@ -58,11 +58,11 @@ export class CodeWhispererWebview extends VueWebview {
     // This function saves and open the file in the editor.
     private async saveFileLocally(localFilePath: string, fileContent: string): Promise<void> {
         try {
-            await fsCommon.writeFile(localFilePath, fileContent)
+            await fs.writeFile(localFilePath, fileContent)
             this.isFileSaved = true
             // Opening the text document
-            await vscode.workspace.openTextDocument(localFilePath).then(async doc => {
-                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active).then(editor => {
+            await vscode.workspace.openTextDocument(localFilePath).then(async (doc) => {
+                await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active).then((editor) => {
                     // Set the selection to the end of the document
                     const endOfDocument = new vscode.Position(
                         doc.lineCount - 1,
@@ -93,7 +93,7 @@ export class CodeWhispererWebview extends VueWebview {
 
     //This function opens the Feedback CodeWhisperer page in the webview
     async openFeedBack(): Promise<void> {
-        return submitFeedback.execute(placeholder, 'CodeWhisperer')
+        return submitFeedback(placeholder, 'Amazon Q')
     }
 
     //------Telemetry------
@@ -147,7 +147,7 @@ export async function showCodeWhispererWebview(
         return
     }
     const webview = await activePanel!.show({
-        title: localize('AWS.view.gettingStartedPage.title', `Learn CodeWhisperer`),
+        title: localize('AWS.view.gettingStartedPage.title', `Learn Amazon Q`),
         viewColumn: isCloud9() ? vscode.ViewColumn.One : vscode.ViewColumn.Active,
     })
 
@@ -159,7 +159,7 @@ export async function showCodeWhispererWebview(
                 subscriptions = undefined
             }),
         ]
-        const prompts = PromptSettings.instance
+        const prompts = AmazonQPromptSettings.instance
         //To check the condition If the user has already seen the welcome message
         if (await prompts.isPromptEnabled('codeWhispererNewWelcomeMessage')) {
             telemetry.ui_click.emit({ elementId: 'codewhisperer_Learn_PageOpen', passive: true })

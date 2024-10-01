@@ -16,6 +16,9 @@ import { SchemaService } from './schemas'
 import { TelemetryLogger } from './telemetry/telemetryLogger'
 import { TelemetryService } from './telemetry/telemetryService'
 import { UriHandler } from './vscode/uriHandler'
+import { GlobalState } from './globalState'
+import { setContext } from './vscode/setContext'
+import { getLogger } from './logger/logger'
 
 type Clock = Pick<
     typeof globalThis,
@@ -45,7 +48,7 @@ function copyClock(): Clock {
 
     const browserAlternatives = getBrowserAlternatives()
     if (Object.keys(browserAlternatives).length > 0) {
-        console.log('globals: Using browser alternatives for clock functions')
+        getLogger().info('globals: Using browser alternatives for clock functions')
         Object.assign(clock, browserAlternatives)
     } else {
         // In node.js context
@@ -82,6 +85,8 @@ function getBrowserAlternatives() {
  *
  * See `web.md` for more info.
  *
+ * Note: The returned globals is shared across all extensions/the entire VS Code instance.
+ *
  */
 function resolveGlobalsObject(): ToolkitGlobals {
     if ((globalThis as any).globals === undefined) {
@@ -96,48 +101,97 @@ function resolveGlobalsObject(): ToolkitGlobals {
 function proxyGlobals(globals_: ToolkitGlobals): ToolkitGlobals {
     return new Proxy(globals_, {
         get: (target, prop) => {
+            // Test for initialize()
+            if (
+                !initialized &&
+                !target.isWeb // extension instance globals would have set this truly globally prior to the test instance globals being accessed.
+            ) {
+                throw new Error(`ToolkitGlobals accessed before initialize()`)
+            }
+
+            // Test that the property was set before access.
+            // Tradeoff: not being able to do something like `globals.myValue ??= ...` without a try/catch
             const propName = String(prop)
             const val = (target as any)[propName]
             if (
                 val !== undefined ||
-                propName.includes('Symbol') || // hack for sinon.stub
-                'isWeb' === propName
+                propName.includes('Symbol') // hack for sinon.stub
             ) {
                 return val
             }
-            throw new Error(`ToolkitGlobals.${propName} accessed before initialize()`)
+            throw new Error(`ToolkitGlobals.${propName} accessed, but this property is not set.`)
         },
     })
 }
 
-const globals = proxyGlobals(resolveGlobalsObject())
+/**
+ * Extension globals object.
+ * Unless this is running in web mode, these globals are scoped only to the current extension.
+ *
+ * TODO: If multiple extensions are running in webmode, they will override and access
+ * each other's globals. We should partition globalThis by extension ID.
+ */
+let globals = proxyGlobals(resolveGlobalsObject())
 
 export function checkDidReload(context: ExtensionContext): boolean {
+    // TODO: fix this
+    // eslint-disable-next-line aws-toolkits/no-banned-usages
     return !!context.globalState.get<string>('ACTIVATION_LAUNCH_PATH_KEY')
 }
 
-export function initialize(context: ExtensionContext): ToolkitGlobals {
+let initialized = false
+export function initialize(context: ExtensionContext, isWeb: boolean = false): ToolkitGlobals {
+    if (!isWeb) {
+        // Not running in web mode, let's use globals scoped to the current extension only.
+        globals = proxyGlobals({} as ToolkitGlobals)
+    }
     Object.assign(globals, {
         context,
         clock: copyClock(),
         didReload: checkDidReload(context),
+        // eslint-disable-next-line aws-toolkits/no-banned-usages
+        globalState: new GlobalState(context.globalState),
         manifestPaths: {} as ToolkitGlobals['manifestPaths'],
         visualizationResourcePaths: {} as ToolkitGlobals['visualizationResourcePaths'],
+        isWeb,
     })
+    void setContext('aws.isWebExtHost', isWeb)
+
+    initialized = true
 
     return globals
 }
 
-export default globals
+export function isWeb() {
+    return globals.isWeb
+}
+
+export { globals as default }
 
 /**
  * Namespace for common variables used globally in the extension.
  * All variables here must be initialized in the activate() method of extension.ts
  */
-interface ToolkitGlobals {
+export interface ToolkitGlobals {
     readonly context: ExtensionContext
+    /** Global, shared (with all vscode instances, including remote!), mutable, persisted state (survives IDE restart), namespaced to the extension (not shared with other vscode extensions). */
+    readonly globalState: GlobalState
+    /** Decides the prefix for package.json extension parameters, e.g. commands, 'setContext' values, etc. */
+    contextPrefix: string
+
+    //
     // TODO: make the rest of these readonly (or delete them)
+    //
+
+    /**
+     * For "normal" messages, to show output from various application features (the result of
+     * a Lambda invocation, "sam build" output, etc.).
+     */
     outputChannel: OutputChannel
+    /**
+     * Log messages. Use `outputChannel` for application messages.
+     */
+    logOutputChannel: OutputChannel
     loginManager: LoginManager
     awsContextCommands: AwsContextCommands
     awsContext: AwsContext

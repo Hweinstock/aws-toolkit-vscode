@@ -6,7 +6,6 @@
 import { fetchSupplementalContextForTest } from './utgUtils'
 import { fetchSupplementalContextForSrc } from './crossFileContextUtil'
 import { isTestFile } from './codeParsingUtil'
-import { DependencyGraphFactory } from '../dependencyGraph/dependencyGraphFactory'
 import * as vscode from 'vscode'
 import { CancellationError } from '../../../shared/utilities/timeoutUtils'
 import { ToolkitError } from '../../../shared/errors'
@@ -18,11 +17,9 @@ export async function fetchSupplementalContext(
     cancellationToken: vscode.CancellationToken
 ): Promise<CodeWhispererSupplementalContext | undefined> {
     const timesBeforeFetching = performance.now()
-    const dependencyGraph = DependencyGraphFactory.getDependencyGraph(editor)
 
     const isUtg = await isTestFile(editor.document.uri.fsPath, {
         languageId: editor.document.languageId,
-        dependencyGraph: dependencyGraph,
         fileContent: editor.document.getText(),
     })
 
@@ -37,7 +34,7 @@ export async function fetchSupplementalContext(
     }
 
     return supplementalContextPromise
-        .then(value => {
+        .then((value) => {
             if (value) {
                 return {
                     isUtg: isUtg,
@@ -51,7 +48,7 @@ export async function fetchSupplementalContext(
                 return undefined
             }
         })
-        .catch(err => {
+        .catch((err) => {
             if (err instanceof ToolkitError && err.cause instanceof CancellationError) {
                 return {
                     isUtg: isUtg,

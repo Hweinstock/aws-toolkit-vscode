@@ -12,9 +12,10 @@ import { AppToWebViewMessageDispatcher } from './chat/views/connector/connector'
 import { Messenger } from './chat/controller/messenger/messenger'
 import { UIMessageListener } from './chat/views/actions/uiMessageListener'
 import { debounce } from 'lodash'
-import { AuthUtil, getChatAuthState } from '../codewhisperer/util/authUtil'
+import { AuthUtil } from '../codewhisperer/util/authUtil'
 import { showTransformationHub } from './commands'
 import { transformByQState } from '../codewhisperer/models/model'
+import { ChatSessionManager } from './chat/storages/chatSession'
 
 export function init(appContext: AmazonQAppInitContext) {
     const gumbyChatControllerEventEmitters: ChatControllerEventEmitters = {
@@ -27,6 +28,10 @@ export function init(appContext: AmazonQAppInitContext) {
         transformationFinished: new vscode.EventEmitter<any>(),
         processHumanChatMessage: new vscode.EventEmitter<any>(),
         linkClicked: new vscode.EventEmitter<any>(),
+        humanInTheLoopStartIntervention: new vscode.EventEmitter<any>(),
+        humanInTheLoopPromptUserForDependency: new vscode.EventEmitter<any>(),
+        humanInTheLoopSelectionUploaded: new vscode.EventEmitter<any>(),
+        errorThrown: new vscode.EventEmitter<any>(),
     }
 
     const dispatcher = new AppToWebViewMessageDispatcher(appContext.getAppsToWebViewMessagePublisher())
@@ -34,24 +39,21 @@ export function init(appContext: AmazonQAppInitContext) {
 
     new GumbyController(gumbyChatControllerEventEmitters, messenger, appContext.onDidChangeAmazonQVisibility.event)
 
-    const featureDevChatUIInputEventEmitter = new vscode.EventEmitter<any>()
+    const gumbyChatUIInputEventEmitter = new vscode.EventEmitter<any>()
 
     new UIMessageListener({
         chatControllerEventEmitters: gumbyChatControllerEventEmitters,
-        webViewMessageListener: new MessageListener<any>(featureDevChatUIInputEventEmitter),
+        webViewMessageListener: new MessageListener<any>(gumbyChatUIInputEventEmitter),
     })
 
-    appContext.registerWebViewToAppMessagePublisher(
-        new MessagePublisher<any>(featureDevChatUIInputEventEmitter),
-        'gumby'
-    )
+    appContext.registerWebViewToAppMessagePublisher(new MessagePublisher<any>(gumbyChatUIInputEventEmitter), 'gumby')
 
     const debouncedEvent = debounce(async () => {
-        const authenticated = (await getChatAuthState()).amazonQ === 'connected'
+        const authenticated = (await AuthUtil.instance.getChatAuthState()).amazonQ === 'connected'
         let authenticatingSessionID = ''
 
         if (authenticated) {
-            const session = sessionStorage.getSession()
+            const session = ChatSessionManager.Instance.getSession()
 
             if (session.isTabOpen() && session.isAuthenticating) {
                 authenticatingSessionID = session.tabID!

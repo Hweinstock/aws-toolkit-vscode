@@ -14,6 +14,8 @@ import {
     formatLocalized,
     formatDateTimestamp,
     sanitizeFilename,
+    toSnakeCase,
+    undefinedIfEmpty,
 } from '../../../shared/utilities/textUtilities'
 import globals from '../../../shared/extensionGlobals'
 
@@ -107,6 +109,44 @@ describe('getStringHash', async function () {
     })
 })
 
+describe('toSnakeCase', function () {
+    const expected = {
+        foo_bar_fi: 'fi',
+        fi_fo_fum: 'fum',
+    }
+
+    it('converts camel case to snake case', function () {
+        const input = {
+            fooBarFi: 'fi',
+            fiFoFum: 'fum',
+        }
+
+        assert.deepStrictEqual(toSnakeCase(input), expected)
+    })
+
+    it('converts pascal case to snake case', function () {
+        const input = {
+            FooBarFi: 'fi',
+            FiFoFum: 'fum',
+        }
+
+        assert.deepStrictEqual(toSnakeCase(input), expected)
+    })
+
+    it('converts upper case to snake case', function () {
+        const input = {
+            FOO_BAR_FI: 'fi',
+            FI_FO_FUM: 'fum',
+        }
+
+        assert.deepStrictEqual(toSnakeCase(input), expected)
+    })
+
+    it('maintains snake case', function () {
+        assert.deepStrictEqual(toSnakeCase(expected), expected)
+    })
+})
+
 describe('getRelativeDate', function () {
     const now = new Date(2020, 4, 4, 4, 4, 4) // adjusts for clock skew modifier in `getRelativeDate` fn.
     it('produces readable dates', function () {
@@ -144,9 +184,25 @@ describe('sanitizeFilename', function () {
         { input: 'foo.txt', output: 'foo.txt', case: 'keeps dot' },
         { input: 'züb', output: 'züb', case: 'keeps special chars' },
     ]
-    cases.forEach(testCase => {
+    cases.forEach((testCase) => {
         it(testCase.case, function () {
             assert.strictEqual(sanitizeFilename(testCase.input, testCase.replaceString), testCase.output)
+        })
+    })
+})
+
+describe('undefinedIfEmpty', function () {
+    const cases: { input: string | undefined; output: string | undefined; case: string }[] = [
+        { input: undefined, output: undefined, case: 'return undefined if input is undefined' },
+        { input: '', output: undefined, case: 'return undefined if input is empty string' },
+        { input: '   ', output: undefined, case: 'return undefined if input is blank' },
+        { input: 'foo', output: 'foo', case: 'return str if input is not empty' },
+        { input: ' foo ', output: ' foo ', case: 'return original str without trim' },
+    ]
+
+    cases.forEach((testCases) => {
+        it(testCases.case, function () {
+            assert.strictEqual(undefinedIfEmpty(testCases.input), testCases.output)
         })
     })
 })

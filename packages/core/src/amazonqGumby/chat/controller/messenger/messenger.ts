@@ -8,9 +8,8 @@
  * As much as possible, all strings used in the experience should originate here.
  */
 
-import { AuthFollowUpType, expiredText, enableQText, reauthenticateText } from '../../../../amazonq/auth/model'
-import { ChatItemType } from '../../../../amazonqFeatureDev/models'
-import { JDKVersion, TransformationCandidateProject } from '../../../../codewhisperer/models/model'
+import { AuthFollowUpType, AuthMessageDataMap } from '../../../../amazonq/auth/model'
+import { JDKVersion, TransformationCandidateProject, transformByQState } from '../../../../codewhisperer/models/model'
 import { FeatureAuthState } from '../../../../codewhisperer/util/authUtil'
 import * as CodeWhispererConstants from '../../../../codewhisperer/models/constants'
 import {
@@ -27,24 +26,31 @@ import {
 } from '../../views/connector/connector'
 import { ChatItemButton, ChatItemFormItem } from '@aws/mynah-ui/dist/static'
 import MessengerUtils, { ButtonActions } from './messengerUtils'
+import DependencyVersions from '../../../models/dependencies'
+import { ChatItemType } from '../../../../amazonq/commons/model'
 
 export type StaticTextResponseType =
     | 'transform'
     | 'java-home-not-set'
     | 'start-transformation-confirmed'
     | 'job-transmitted'
+    | 'end-HIL-early'
 
-export type ErrorTextResponseType =
+export type UnrecoverableErrorType =
     | 'no-project-found'
     | 'no-java-project-found'
     | 'no-maven-java-project-found'
     | 'could-not-compile-project'
     | 'invalid-java-home'
     | 'unsupported-source-jdk-version'
+    | 'upload-to-s3-failed'
+    | 'job-start-failed'
 
 export enum GumbyNamedMessages {
     COMPILATION_PROGRESS_MESSAGE = 'gumbyProjectCompilationMessage',
     JOB_SUBMISSION_STATUS_MESSAGE = 'gumbyJobSubmissionMessage',
+    JOB_SUBMISSION_WITH_DEPENDENCY_STATUS_MESSAGE = 'gumbyJobSubmissionWithDependencyMessage',
+    JOB_FAILED_IN_PRE_BUILD = 'gumbyJobFailedInPreBuildMessage',
 }
 
 export class Messenger {
@@ -79,20 +85,21 @@ export class Messenger {
 
     public async sendAuthNeededExceptionMessage(credentialState: FeatureAuthState, tabID: string) {
         let authType: AuthFollowUpType = 'full-auth'
-        let message = reauthenticateText
-        if (credentialState.amazonQ === 'disconnected') {
-            authType = 'full-auth'
-            message = reauthenticateText
-        }
+        let message = AuthMessageDataMap[authType].message
 
-        if (credentialState.amazonQ === 'unsupported') {
-            authType = 'use-supported-auth'
-            message = enableQText
-        }
-
-        if (credentialState.amazonQ === 'expired') {
-            authType = 're-auth'
-            message = expiredText
+        switch (credentialState.amazonQ) {
+            case 'disconnected':
+                authType = 'full-auth'
+                message = AuthMessageDataMap[authType].message
+                break
+            case 'unsupported':
+                authType = 'use-supported-auth'
+                message = AuthMessageDataMap[authType].message
+                break
+            case 'expired':
+                authType = 're-auth'
+                message = AuthMessageDataMap[authType].message
+                break
         }
 
         this.dispatcher.sendAuthNeededExceptionMessage(new AuthNeededException(message, authType, tabID))
@@ -102,11 +109,50 @@ export class Messenger {
         this.dispatcher.sendAuthenticationUpdate(new AuthenticationUpdateMessage(gumbyEnabled, authenticatingTabIDs))
     }
 
+    public async sendSkipTestsPrompt(tabID: string) {
+        const formItems: ChatItemFormItem[] = []
+        formItems.push({
+            id: 'GumbyTransformSkipTestsForm',
+            type: 'select',
+            title: CodeWhispererConstants.skipUnitTestsFormTitle,
+            mandatory: true,
+            options: [
+                {
+                    value: CodeWhispererConstants.runUnitTestsMessage,
+                    label: CodeWhispererConstants.runUnitTestsMessage,
+                },
+                {
+                    value: CodeWhispererConstants.skipUnitTestsMessage,
+                    label: CodeWhispererConstants.skipUnitTestsMessage,
+                },
+            ],
+        })
+
+        this.dispatcher.sendAsyncEventProgress(
+            new AsyncEventProgressMessage(tabID, {
+                inProgress: true,
+                message: CodeWhispererConstants.skipUnitTestsFormMessage,
+            })
+        )
+
+        this.dispatcher.sendChatPrompt(
+            new ChatPrompt(
+                {
+                    message: 'Q Code Transformation',
+                    formItems: formItems,
+                },
+                'TransformSkipTestsForm',
+                tabID,
+                false
+            )
+        )
+    }
+
     public async sendProjectPrompt(projects: TransformationCandidateProject[], tabID: string) {
         const projectFormOptions: { value: any; label: string }[] = []
         const detectedJavaVersions = new Array<JDKVersion | undefined>()
 
-        projects.forEach(candidateProject => {
+        projects.forEach((candidateProject) => {
             projectFormOptions.push({
                 value: candidateProject.path,
                 label: candidateProject.name,
@@ -118,7 +164,7 @@ export class Messenger {
         formItems.push({
             id: 'GumbyTransformProjectForm',
             type: 'select',
-            title: 'Choose a project to transform',
+            title: CodeWhispererConstants.chooseProjectFormTitle,
             mandatory: true,
 
             options: projectFormOptions,
@@ -127,7 +173,7 @@ export class Messenger {
         formItems.push({
             id: 'GumbyTransformJdkFromForm',
             type: 'select',
-            title: 'Choose the source code version',
+            title: CodeWhispererConstants.chooseSourceVersionFormTitle,
             mandatory: true,
             options: [
                 {
@@ -148,7 +194,7 @@ export class Messenger {
         formItems.push({
             id: 'GumbyTransformJdkToForm',
             type: 'select',
-            title: 'Choose the target code version',
+            title: CodeWhispererConstants.chooseTargetVersionFormTitle,
             mandatory: true,
             options: [
                 {
@@ -220,9 +266,12 @@ export class Messenger {
         )
     }
 
-    public sendJobSubmittedMessage(tabID: string, disableJobActions: boolean = false) {
-        const message = CodeWhispererConstants.jobStartedChatMessage
-
+    public sendJobSubmittedMessage(
+        tabID: string,
+        disableJobActions: boolean = false,
+        message: string = CodeWhispererConstants.jobStartedChatMessage,
+        messageID: string = GumbyNamedMessages.JOB_SUBMISSION_STATUS_MESSAGE
+    ) {
         const buttons: ChatItemButton[] = []
 
         if (!disableJobActions) {
@@ -245,7 +294,7 @@ export class Messenger {
             {
                 message,
                 messageType: 'ai-prompt',
-                messageId: GumbyNamedMessages.JOB_SUBMISSION_STATUS_MESSAGE,
+                messageId: messageID,
                 buttons,
             },
             tabID
@@ -273,6 +322,9 @@ export class Messenger {
             case 'java-home-not-set':
                 message = MessengerUtils.createJavaHomePrompt()
                 break
+            case 'end-HIL-early':
+                message = `I will continue transforming your code without upgrading this dependency.`
+                break
         }
 
         this.dispatcher.sendChatMessage(
@@ -286,7 +338,13 @@ export class Messenger {
         )
     }
 
-    public sendRetryableErrorResponse(type: ErrorTextResponseType, tabID: string) {
+    /**
+     * This method renders an error message with a button at the end that will try the
+     * transformation again from the beginning. This message is meant for errors that are
+     * completely unrecoverable: the job cannot be completed in its current state,
+     * and the flow must be tried again.
+     */
+    public sendUnrecoverableErrorResponse(type: UnrecoverableErrorType, tabID: string) {
         let message = '...'
 
         switch (type) {
@@ -307,6 +365,7 @@ export class Messenger {
                 break
             case 'unsupported-source-jdk-version':
                 message = CodeWhispererConstants.unsupportedJavaVersionChatMessage
+                break
         }
 
         const buttons: ChatItemButton[] = []
@@ -328,11 +387,29 @@ export class Messenger {
         )
     }
 
-    public sendCommandMessage(message: any) {
-        this.dispatcher.sendCommandMessage(new SendCommandMessage(message.command, message.tabId, message.eventId))
+    /**
+     * @description This method renders an error message as a plain message with no other prompt or action
+     * for the user to follow. Either the job can continue and this message is purely for
+     * informational purposes, or some other error workflow is meant to contribute a
+     * follow-up with a user action.
+     */
+    public sendKnownErrorResponse(tabID: string, message: string) {
+        this.dispatcher.sendChatMessage(
+            new ChatMessage(
+                {
+                    message,
+                    messageType: 'ai-prompt',
+                },
+                tabID
+            )
+        )
     }
 
-    public sendJobFinishedMessage(tabID: string, message: string = '') {
+    public sendCommandMessage(message: any) {
+        this.dispatcher.sendCommandMessage(new SendCommandMessage(message.command, message.tabID, message.eventId))
+    }
+
+    public sendJobFinishedMessage(tabID: string, message: string) {
         const buttons: ChatItemButton[] = []
         buttons.push({
             keepCardAfterClick: false,
@@ -369,7 +446,7 @@ export class Messenger {
         projectName: string,
         fromJDKVersion: JDKVersion,
         toJDKVersion: JDKVersion,
-        tabID: any
+        tabID: string
     ) {
         const message = `### Transformation details
 -------------
@@ -381,5 +458,158 @@ export class Messenger {
     `
 
         this.dispatcher.sendChatMessage(new ChatMessage({ message, messageType: 'prompt' }, tabID))
+    }
+
+    public sendSkipTestsSelectionMessage(skipTestsSelection: string, tabID: string) {
+        const message = `Okay, I will ${skipTestsSelection.toLowerCase()} when building your project.`
+        this.dispatcher.sendChatMessage(new ChatMessage({ message, messageType: 'ai-prompt' }, tabID))
+    }
+
+    public sendHumanInTheLoopInitialMessage(tabID: string, codeSnippet: string) {
+        let message = `I was not able to upgrade all dependencies. To resolve it, I will try to find an updated depedency in your local Maven repository. I will need additional information from you to continue.`
+
+        this.dispatcher.sendChatMessage(
+            new ChatMessage(
+                {
+                    message,
+                    messageType: 'ai-prompt',
+                },
+                tabID
+            )
+        )
+
+        if (codeSnippet !== '') {
+            message = `Here is the dependency causing the issue:
+\`\`\`
+${codeSnippet}
+\`\`\`
+`
+
+            const buttons: ChatItemButton[] = []
+            buttons.push({
+                keepCardAfterClick: true,
+                text: 'Open File',
+                id: ButtonActions.OPEN_FILE,
+            })
+
+            this.dispatcher.sendChatMessage(
+                new ChatMessage(
+                    {
+                        message,
+                        messageType: 'ai-prompt',
+                        buttons,
+                    },
+                    tabID
+                )
+            )
+        }
+
+        message = `I am searching for other dependency versions available in your Maven repository...`
+
+        this.sendInProgressMessage(tabID, message)
+    }
+
+    public sendInProgressMessage(tabID: string, message: string, messageName?: string) {
+        this.dispatcher.sendAsyncEventProgress(
+            new AsyncEventProgressMessage(tabID, { inProgress: true, message: undefined })
+        )
+
+        this.dispatcher.sendAsyncEventProgress(
+            new AsyncEventProgressMessage(tabID, {
+                inProgress: true,
+                message,
+            })
+        )
+    }
+
+    public sendDependencyVersionsFoundMessage(versions: DependencyVersions, tabID: string) {
+        const message = MessengerUtils.createAvailableDependencyVersionString(versions)
+
+        const valueFormOptions: { value: any; label: string }[] = []
+
+        versions.allVersions.forEach((version) => {
+            valueFormOptions.push({
+                value: version,
+                label: version,
+            })
+        })
+
+        const formItems: ChatItemFormItem[] = []
+        formItems.push({
+            id: 'GumbyTransformDependencyForm',
+            type: 'select',
+            title: 'Choose which version I should use:',
+            mandatory: true,
+
+            options: valueFormOptions,
+        })
+
+        this.dispatcher.sendChatPrompt(
+            new ChatPrompt(
+                {
+                    message,
+                    formItems: formItems,
+                },
+                'TransformDependencyForm',
+                tabID,
+                false
+            )
+        )
+    }
+
+    public sendHILContinueMessage(tabID: string, selectedDependencyVersion: string) {
+        let message = `### Dependency Details
+-------------
+| | |
+| :------------------- | -------: |
+| **Dependency Version**             |   ${selectedDependencyVersion}   |
+`
+
+        this.dispatcher.sendChatMessage(new ChatMessage({ message, messageType: 'prompt' }, tabID))
+
+        message = `I received your target version dependency.`
+        this.sendInProgressMessage(tabID, message)
+    }
+
+    public sendHILResumeMessage(tabID: string) {
+        const message = `I will continue transforming your code. You can monitor progress in the Transformation Hub.`
+        this.sendAsyncEventProgress(
+            tabID,
+            true,
+            undefined,
+            GumbyNamedMessages.JOB_SUBMISSION_WITH_DEPENDENCY_STATUS_MESSAGE
+        )
+        this.sendJobSubmittedMessage(
+            tabID,
+            false,
+            message,
+            GumbyNamedMessages.JOB_SUBMISSION_WITH_DEPENDENCY_STATUS_MESSAGE
+        )
+    }
+
+    public sendViewBuildLog(tabID: string) {
+        const message = `I am having trouble building your project in the secure build environment and could not complete the transformation.`
+        const messageId = GumbyNamedMessages.JOB_FAILED_IN_PRE_BUILD
+        const buttons: ChatItemButton[] = []
+
+        if (transformByQState.getPreBuildLogFilePath() !== '') {
+            buttons.push({
+                keepCardAfterClick: true,
+                text: `View Build Log`,
+                id: ButtonActions.OPEN_BUILD_LOG,
+            })
+        }
+
+        this.dispatcher.sendChatMessage(
+            new ChatMessage(
+                {
+                    message,
+                    messageType: 'ai-prompt',
+                    messageId,
+                    buttons,
+                },
+                tabID
+            )
+        )
     }
 }

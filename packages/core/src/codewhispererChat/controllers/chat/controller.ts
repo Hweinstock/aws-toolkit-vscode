@@ -2,7 +2,6 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-
 import { Event as VSCodeEvent, Uri } from 'vscode'
 import { EditorContextExtractor } from '../../editor/context/extractor'
 import { ChatSessionStorage } from '../../storages/chatSession'
@@ -42,10 +41,17 @@ import { CWCTelemetryHelper, recordTelemetryChatRunCommand } from './telemetryHe
 import { CodeWhispererTracker } from '../../../codewhisperer/tracker/codewhispererTracker'
 import { getLogger } from '../../../shared/logger/logger'
 import { triggerPayloadToChatRequest } from './chatRequest/converter'
-import { OnboardingPageInteraction } from '../../../amazonq/onboardingPage/model'
-import { getChatAuthState } from '../../../codewhisperer/util/authUtil'
+import { AuthUtil } from '../../../codewhisperer/util/authUtil'
 import { openUrl } from '../../../shared/utilities/vsCodeUtils'
-import { randomUUID } from '../../../common/crypto'
+import { randomUUID } from '../../../shared/crypto'
+import { LspController } from '../../../amazonq/lsp/lspController'
+import { CodeWhispererSettings } from '../../../codewhisperer/util/codewhispererSettings'
+import { getSelectedCustomization } from '../../../codewhisperer/util/customizationUtil'
+import { FeatureConfigProvider } from '../../../shared/featureConfig'
+import { getHttpStatusCode, AwsClientResponseError } from '../../../shared/errors'
+import { uiEventRecorder } from '../../../amazonq/util/eventRecorder'
+import { globals } from '../../../shared'
+import { telemetry } from '../../../shared/telemetry'
 
 export interface ChatControllerMessagePublishers {
     readonly processPromptChatMessage: MessagePublisher<PromptMessage>
@@ -60,7 +66,6 @@ export interface ChatControllerMessagePublishers {
     readonly processChatItemVotedMessage: MessagePublisher<ChatItemVotedMessage>
     readonly processChatItemFeedbackMessage: MessagePublisher<ChatItemFeedbackMessage>
     readonly processUIFocusMessage: MessagePublisher<UIFocusMessage>
-    readonly processOnboardingPageInteraction: MessagePublisher<OnboardingPageInteraction>
     readonly processSourceLinkClick: MessagePublisher<SourceLinkClickMessage>
     readonly processResponseBodyLinkClick: MessagePublisher<ResponseBodyLinkClickMessage>
     readonly processFooterInfoLinkClick: MessagePublisher<FooterInfoLinkClick>
@@ -79,7 +84,6 @@ export interface ChatControllerMessageListeners {
     readonly processChatItemVotedMessage: MessageListener<ChatItemVotedMessage>
     readonly processChatItemFeedbackMessage: MessageListener<ChatItemFeedbackMessage>
     readonly processUIFocusMessage: MessageListener<UIFocusMessage>
-    readonly processOnboardingPageInteraction: MessageListener<OnboardingPageInteraction>
     readonly processSourceLinkClick: MessageListener<SourceLinkClickMessage>
     readonly processResponseBodyLinkClick: MessageListener<ResponseBodyLinkClickMessage>
     readonly processFooterInfoLinkClick: MessageListener<FooterInfoLinkClick>
@@ -112,7 +116,7 @@ export class ChatController {
         this.promptGenerator = new PromptsGenerator()
         this.userIntentRecognizer = new UserIntentRecognizer()
 
-        onDidChangeAmazonQVisibility(visible => {
+        onDidChangeAmazonQVisibility((visible) => {
             if (visible) {
                 this.telemetryHelper.recordOpenChat()
             } else {
@@ -120,64 +124,75 @@ export class ChatController {
             }
         })
 
-        this.chatControllerMessageListeners.processPromptChatMessage.onMessage(data => {
-            return this.processPromptChatMessage(data)
+        this.chatControllerMessageListeners.processPromptChatMessage.onMessage((data) => {
+            if (data.traceId) {
+                uiEventRecorder.set(data.traceId, {
+                    events: {
+                        featureReceivedMessage: globals.clock.Date.now(),
+                    },
+                })
+            }
+            /**
+             * traceId is only instrumented for chat-prompt but not for things
+             * like follow-up-was-clicked. In those cases we fallback to a different
+             * uuid
+             **/
+            return telemetry.withTraceId(() => {
+                return this.processPromptChatMessage(data)
+            }, data.traceId ?? randomUUID())
         })
 
-        this.chatControllerMessageListeners.processTabCreatedMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processTabCreatedMessage.onMessage((data) => {
             return this.processTabCreateMessage(data)
         })
 
-        this.chatControllerMessageListeners.processTabClosedMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processTabClosedMessage.onMessage((data) => {
             return this.processTabCloseMessage(data)
         })
 
-        this.chatControllerMessageListeners.processTabChangedMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processTabChangedMessage.onMessage((data) => {
             return this.processTabChangedMessage(data)
         })
 
-        this.chatControllerMessageListeners.processInsertCodeAtCursorPosition.onMessage(data => {
+        this.chatControllerMessageListeners.processInsertCodeAtCursorPosition.onMessage((data) => {
             return this.processInsertCodeAtCursorPosition(data)
         })
 
-        this.chatControllerMessageListeners.processCopyCodeToClipboard.onMessage(data => {
+        this.chatControllerMessageListeners.processCopyCodeToClipboard.onMessage((data) => {
             return this.processCopyCodeToClipboard(data)
         })
 
-        this.chatControllerMessageListeners.processContextMenuCommand.onMessage(data => {
+        this.chatControllerMessageListeners.processContextMenuCommand.onMessage((data) => {
             return this.processContextMenuCommand(data)
         })
 
-        this.chatControllerMessageListeners.processTriggerTabIDReceived.onMessage(data => {
+        this.chatControllerMessageListeners.processTriggerTabIDReceived.onMessage((data) => {
             return this.processTriggerTabIDReceived(data)
         })
 
-        this.chatControllerMessageListeners.processStopResponseMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processStopResponseMessage.onMessage((data) => {
             return this.processStopResponseMessage(data)
         })
 
-        this.chatControllerMessageListeners.processChatItemVotedMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processChatItemVotedMessage.onMessage((data) => {
             return this.processChatItemVotedMessage(data)
         })
 
-        this.chatControllerMessageListeners.processChatItemFeedbackMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processChatItemFeedbackMessage.onMessage((data) => {
             return this.processChatItemFeedbackMessage(data)
         })
 
-        this.chatControllerMessageListeners.processUIFocusMessage.onMessage(data => {
+        this.chatControllerMessageListeners.processUIFocusMessage.onMessage((data) => {
             return this.processUIFocusMessage(data)
         })
 
-        this.chatControllerMessageListeners.processOnboardingPageInteraction.onMessage(data => {
-            return this.processOnboardingPageInteraction(data)
-        })
-        this.chatControllerMessageListeners.processSourceLinkClick.onMessage(data => {
+        this.chatControllerMessageListeners.processSourceLinkClick.onMessage((data) => {
             return this.processSourceLinkClick(data)
         })
-        this.chatControllerMessageListeners.processResponseBodyLinkClick.onMessage(data => {
+        this.chatControllerMessageListeners.processResponseBodyLinkClick.onMessage((data) => {
             return this.processResponseBodyLinkClick(data)
         })
-        this.chatControllerMessageListeners.processFooterInfoLinkClick.onMessage(data => {
+        this.chatControllerMessageListeners.processFooterInfoLinkClick.onMessage((data) => {
             return this.processFooterInfoLinkClick(data)
         })
     }
@@ -204,7 +219,7 @@ export class ChatController {
     private processQuickActionCommand(quickActionCommand: ChatPromptCommandType) {
         this.editorContextExtractor
             .extractContextForTrigger('QuickAction')
-            .then(context => {
+            .then((context) => {
                 const triggerID = randomUUID()
 
                 this.messenger.sendQuickActionMessage(quickActionCommand, triggerID)
@@ -224,52 +239,7 @@ export class ChatController {
                     return
                 }
             })
-            .catch(e => {
-                this.processException(e, '')
-            })
-    }
-
-    private processOnboardingPageInteraction(interaction: OnboardingPageInteraction) {
-        this.editorContextExtractor
-            .extractContextForTrigger('OnboardingPageInteraction')
-            .then(context => {
-                const triggerID = randomUUID()
-
-                const prompt = this.promptGenerator.generateForOnboardingPageInteraction(interaction)
-
-                this.messenger.sendOnboardingPageInteractionMessage(interaction, triggerID)
-
-                this.triggerEventsStorage.addTriggerEvent({
-                    id: triggerID,
-                    tabID: undefined,
-                    message: prompt,
-                    type: 'onboarding_page_interaction',
-                    context,
-                    onboardingPageInteraction: interaction,
-                })
-
-                if (interaction.type === 'onboarding-page-cwc-button-clicked') {
-                    void this.generateStaticTextResponse('onboarding-help', triggerID)
-                    return
-                }
-
-                return this.generateResponse(
-                    {
-                        message: prompt,
-                        trigger: ChatTriggerType.ChatMessage,
-                        query: undefined,
-                        codeSelection: context?.focusAreaContext?.selectionInsideExtendedCodeBlock,
-                        fileText: context?.focusAreaContext?.extendedCodeBlock,
-                        fileLanguage: context?.activeFileContext?.fileLanguage,
-                        filePath: context?.activeFileContext?.filePath,
-                        matchPolicy: context?.activeFileContext?.matchPolicy,
-                        codeQuery: context?.focusAreaContext?.names,
-                        userIntent: this.userIntentRecognizer.getFromOnboardingPageInteraction(interaction),
-                    },
-                    triggerID
-                )
-            })
-            .catch(e => {
+            .catch((e) => {
                 this.processException(e, '')
             })
     }
@@ -296,6 +266,7 @@ export class ChatController {
             CodeWhispererTracker.getTracker().enqueue({
                 conversationID: this.telemetryHelper.getConversationId(message.tabID) ?? '',
                 messageID: message.messageId,
+                userIntent: message.userIntent,
                 time: new Date(),
                 fileUrl: editor.document.uri,
                 startPosition: cursorStart,
@@ -346,24 +317,7 @@ export class ChatController {
             errorMessage = e.toUpperCase()
         } else if (e instanceof SyntaxError) {
             // Workaround to handle case when LB returns web-page with error and our client doesn't return proper exception
-            // eslint-disable-next-line no-prototype-builtins
-            if (e.hasOwnProperty('$response')) {
-                type exceptionKeyType = keyof typeof e
-                const responseKey = '$response' as exceptionKeyType
-                const response = e[responseKey]
-
-                let reason
-
-                if (response) {
-                    type responseKeyType = keyof typeof response
-                    const reasonKey = 'reason' as responseKeyType
-                    reason = response[reasonKey]
-                }
-
-                errorMessage = reason ? (reason as string) : defaultMessage
-            } else {
-                errorMessage = defaultMessage
-            }
+            errorMessage = AwsClientResponseError.tryExtractReasonFromSyntaxError(e) ?? defaultMessage
         } else if (e instanceof CodeWhispererStreamingServiceException) {
             errorMessage = e.message
             requestID = e.$metadata.requestId
@@ -385,7 +339,7 @@ export class ChatController {
 
         this.editorContextExtractor
             .extractContextForTrigger('ContextMenu')
-            .then(context => {
+            .then((context) => {
                 const triggerID = randomUUID()
 
                 if (context?.focusAreaContext?.codeBlock === undefined) {
@@ -394,11 +348,23 @@ export class ChatController {
 
                 const prompt = this.promptGenerator.generateForContextMenuCommand(command)
 
-                this.messenger.sendEditorContextCommandMessage(
-                    command.type,
-                    context?.focusAreaContext?.codeBlock ?? '',
-                    triggerID
-                )
+                if (command.type === 'aws.amazonq.explainIssue') {
+                    this.messenger.sendEditorContextCommandMessage(
+                        command.type,
+                        context.activeFileContext?.fileText
+                            ?.split('\n')
+                            .slice(command.issue.startLine, command.issue.endLine)
+                            .join('') ?? '',
+                        triggerID,
+                        command.issue
+                    )
+                } else {
+                    this.messenger.sendEditorContextCommandMessage(
+                        command.type,
+                        context?.focusAreaContext?.codeBlock ?? '',
+                        triggerID
+                    )
+                }
 
                 if (command.type === 'aws.amazonq.sendToPrompt') {
                     // No need for response if send the code to prompt
@@ -426,11 +392,12 @@ export class ChatController {
                         matchPolicy: context?.activeFileContext?.matchPolicy,
                         codeQuery: context?.focusAreaContext?.names,
                         userIntent: this.userIntentRecognizer.getFromContextMenuCommand(command),
+                        customization: getSelectedCustomization(),
                     },
                     triggerID
                 )
             })
-            .catch(e => {
+            .catch((e) => {
                 this.processException(e, '')
             })
     }
@@ -440,7 +407,6 @@ export class ChatController {
             this.messenger.sendErrorMessage('chatMessage should be set', message.tabID, undefined)
             return
         }
-
         try {
             switch (message.command) {
                 case 'follow-up-was-clicked':
@@ -503,6 +469,7 @@ export class ChatController {
                     matchPolicy: lastTriggerEvent.context?.activeFileContext?.matchPolicy,
                     codeQuery: lastTriggerEvent.context?.focusAreaContext?.names,
                     userIntent: message.userIntent,
+                    customization: getSelectedCustomization(),
                 },
                 triggerID
             )
@@ -514,7 +481,7 @@ export class ChatController {
     private async processPromptMessageAsNewThread(message: PromptMessage) {
         this.editorContextExtractor
             .extractContextForTrigger('ChatMessage')
-            .then(context => {
+            .then((context) => {
                 const triggerID = randomUUID()
                 this.triggerEventsStorage.addTriggerEvent({
                     id: triggerID,
@@ -535,11 +502,13 @@ export class ChatController {
                         matchPolicy: context?.activeFileContext?.matchPolicy,
                         codeQuery: context?.focusAreaContext?.names,
                         userIntent: this.userIntentRecognizer.getFromPromptChatMessage(message),
+                        customization: getSelectedCustomization(),
+                        traceId: message.traceId,
                     },
                     triggerID
                 )
             })
-            .catch(e => {
+            .catch((e) => {
                 this.processException(e, message.tabID)
             })
     }
@@ -557,7 +526,7 @@ export class ChatController {
 
         if (triggerEvent.tabID === undefined) {
             setTimeout(() => {
-                this.generateStaticTextResponse(responseType, triggerID).catch(e => {
+                this.generateStaticTextResponse(responseType, triggerID).catch((e) => {
                     getLogger().error('generateStaticTextResponse failed: %s', (e as Error).message)
                 })
             }, 20)
@@ -566,7 +535,7 @@ export class ChatController {
 
         const tabID = triggerEvent.tabID
 
-        const credentialsState = await getChatAuthState()
+        const credentialsState = await AuthUtil.instance.getChatAuthState()
 
         if (credentialsState.codewhispererChat !== 'connected' && credentialsState.codewhispererCore !== 'connected') {
             await this.messenger.sendAuthNeededExceptionMessage(credentialsState, tabID, triggerID)
@@ -576,8 +545,10 @@ export class ChatController {
         this.messenger.sendStaticTextResponse(responseType, triggerID, tabID)
     }
 
-    private async generateResponse(triggerPayload: TriggerPayload, triggerID: string) {
-        // Loop while we waiting for tabID to be set
+    private async generateResponse(
+        triggerPayload: TriggerPayload & { projectContextQueryLatencyMs?: number },
+        triggerID: string
+    ) {
         const triggerEvent = this.triggerEventsStorage.getTriggerEvent(triggerID)
         if (triggerEvent === undefined) {
             return
@@ -589,7 +560,7 @@ export class ChatController {
 
         if (triggerEvent.tabID === undefined) {
             setTimeout(() => {
-                this.generateResponse(triggerPayload, triggerID).catch(e => {
+                this.generateResponse(triggerPayload, triggerID).catch((e) => {
                     getLogger().error('generateResponse failed: %s', (e as Error).message)
                 })
             }, 20)
@@ -598,7 +569,7 @@ export class ChatController {
 
         const tabID = triggerEvent.tabID
 
-        const credentialsState = await getChatAuthState()
+        const credentialsState = await AuthUtil.instance.getChatAuthState()
 
         if (
             !(credentialsState.codewhispererChat === 'connected' && credentialsState.codewhispererCore === 'connected')
@@ -606,11 +577,46 @@ export class ChatController {
             await this.messenger.sendAuthNeededExceptionMessage(credentialsState, tabID, triggerID)
             return
         }
+        triggerPayload.useRelevantDocuments = false
+        if (triggerPayload.message) {
+            triggerPayload.useRelevantDocuments = triggerPayload.message.includes(`@workspace`)
+            if (triggerPayload.useRelevantDocuments) {
+                triggerPayload.message = triggerPayload.message.replace(/@workspace/g, '')
+                if (CodeWhispererSettings.instance.isLocalIndexEnabled()) {
+                    const start = performance.now()
+                    triggerPayload.relevantTextDocuments = await LspController.instance.query(triggerPayload.message)
+                    triggerPayload.relevantTextDocuments.forEach((doc) => {
+                        getLogger().info(
+                            `amazonq: Using workspace files ${doc.relativeFilePath}, content(partial): ${doc.text?.substring(0, 200)}`
+                        )
+                    })
+                    triggerPayload.projectContextQueryLatencyMs = performance.now() - start
+                } else {
+                    this.messenger.sendOpenSettingsMessage(triggerID, tabID)
+                    return
+                }
+            }
+            // if user does not have @workspace in the prompt, but user is in the data collection group
+            // If the user is in the data collection group but turned off local index to opt-out, do not collect data.
+            // TODO: Remove this entire block of code in one month as requested
+            else if (
+                FeatureConfigProvider.instance.isAmznDataCollectionGroup() &&
+                !LspController.instance.isIndexingInProgress() &&
+                CodeWhispererSettings.instance.isLocalIndexEnabled()
+            ) {
+                getLogger().info(`amazonq: User is in data collection group`)
+                const start = performance.now()
+                triggerPayload.relevantTextDocuments = await LspController.instance.query(triggerPayload.message)
+                triggerPayload.projectContextQueryLatencyMs = performance.now() - start
+            }
+        }
 
         const request = triggerPayloadToChatRequest(triggerPayload)
         const session = this.sessionStorage.getSession(tabID)
         getLogger().info(
-            `request from tab: ${tabID} coversationID: ${session.sessionIdentifier} request: ${JSON.stringify(request)}`
+            `request from tab: ${tabID} conversationID: ${session.sessionIdentifier} request: ${JSON.stringify(
+                request
+            )}`
         )
         let response: GenerateAssistantResponseCommandOutput | undefined = undefined
         session.createNewTokenSource()
@@ -621,13 +627,13 @@ export class ChatController {
             this.telemetryHelper.recordStartConversation(triggerEvent, triggerPayload)
 
             getLogger().info(
-                `response to tab: ${tabID} coversationID: ${session.sessionIdentifier} requestID: ${
+                `response to tab: ${tabID} conversationID: ${session.sessionIdentifier} requestID: ${
                     response.$metadata.requestId
                 } metadata: ${JSON.stringify(response.$metadata)}`
             )
             await this.messenger.sendAIResponse(response, session, tabID, triggerID, triggerPayload)
         } catch (e: any) {
-            this.telemetryHelper.recordMessageResponseError(triggerPayload, tabID, e?.$metadata?.httpStatusCode ?? 0)
+            this.telemetryHelper.recordMessageResponseError(triggerPayload, tabID, getHttpStatusCode(e) ?? 0)
             // clears session, record telemetry before this call
             this.processException(e, tabID)
         }

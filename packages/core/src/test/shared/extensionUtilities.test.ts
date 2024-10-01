@@ -11,13 +11,8 @@ import * as path from 'path'
 import * as sinon from 'sinon'
 import { DefaultEc2MetadataClient } from '../../shared/clients/ec2MetadataClient'
 import * as vscode from 'vscode'
-import {
-    ExtensionUserActivity,
-    getComputeRegion,
-    initializeComputeRegion,
-    mostRecentVersionKey,
-} from '../../shared/extensionUtilities'
-import { isDifferentVersion, safeGet, setMostRecentVersion } from '../../shared/extensionUtilities'
+import { UserActivity, getComputeRegion, initializeComputeRegion } from '../../shared/extensionUtilities'
+import { isDifferentVersion, setMostRecentVersion } from '../../shared/extensionUtilities'
 import * as filesystemUtilities from '../../shared/filesystemUtilities'
 import { FakeExtensionContext } from '../fakeExtensionContext'
 import { InstanceIdentity } from '../../shared/clients/ec2MetadataClient'
@@ -27,36 +22,12 @@ import globals from '../../shared/extensionGlobals'
 import { createQuickStartWebview } from '../../shared/extensionStartup'
 
 describe('extensionUtilities', function () {
-    describe('safeGet', function () {
-        class Blah {
-            public someProp?: string
-
-            public constructor(someProp?: string) {
-                this.someProp = someProp
-            }
-        }
-
-        it('can access sub-property', function () {
-            assert.strictEqual(
-                safeGet(new Blah('hello!'), x => x.someProp),
-                'hello!'
-            )
-            assert.strictEqual(
-                safeGet(new Blah(), x => x.someProp),
-                undefined
-            )
-            assert.strictEqual(
-                safeGet(undefined as Blah | undefined, x => x.someProp),
-                undefined
-            )
-        })
-    })
-
     describe('createQuickStartWebview', async function () {
-        const context = await FakeExtensionContext.create()
+        let context: FakeExtensionContext
         let tempDir: string | undefined
 
         beforeEach(async function () {
+            context = await FakeExtensionContext.create()
             tempDir = await filesystemUtilities.makeTemporaryToolkitFolder()
             context.extensionPath = tempDir
         })
@@ -101,34 +72,28 @@ describe('extensionUtilities', function () {
     describe('isDifferentVersion', function () {
         it('returns false if the version exists and matches the existing version exactly', async function () {
             const goodVersion = '1.2.3'
-            const extContext = await FakeExtensionContext.create()
-            await extContext.globalState.update(mostRecentVersionKey, goodVersion)
+            await globals.globalState.update('globalsMostRecentVersion', goodVersion)
 
-            assert.strictEqual(isDifferentVersion(extContext, goodVersion), false)
+            assert.strictEqual(isDifferentVersion(goodVersion), false)
         })
 
         it("returns true if a most recent version isn't set", async () => {
-            const extContext = await FakeExtensionContext.create()
-
-            assert.ok(isDifferentVersion(extContext))
+            assert.ok(isDifferentVersion())
         })
 
         it("returns true if a most recent version doesn't match the current version", async () => {
             const oldVersion = '1.2.3'
             const newVersion = '4.5.6'
-            const extContext = await FakeExtensionContext.create()
-            await extContext.globalState.update(mostRecentVersionKey, oldVersion)
+            await globals.globalState.update('globalsMostRecentVersion', oldVersion)
 
-            assert.ok(isDifferentVersion(extContext, newVersion))
+            assert.ok(isDifferentVersion(newVersion))
         })
     })
 
     describe('setMostRecentVersion', function () {
         it('sets the most recent version', async function () {
-            const extContext = await FakeExtensionContext.create()
-            setMostRecentVersion(extContext)
-
-            assert.strictEqual(extContext.globalState.get<string>(mostRecentVersionKey), extensionVersion)
+            setMostRecentVersion()
+            assert.strictEqual(globals.globalState.get('globalsMostRecentVersion'), extensionVersion)
         })
     })
 })
@@ -209,7 +174,7 @@ describe('initializeComputeRegion, getComputeRegion', async function () {
     })
 })
 
-describe('ExtensionUserActivity', function () {
+describe('UserActivity', function () {
     let count: number
     let sandbox: sinon.SinonSandbox
 
@@ -234,7 +199,7 @@ describe('ExtensionUserActivity', function () {
             secondIntervalStart + 201,
             secondIntervalStart + 202,
         ]
-        const instance = new ExtensionUserActivity(throttleDelay, [
+        const instance = new UserActivity(throttleDelay, [
             ...firstInvervalMillisUntilFire.map(delayedTriggeredEvent),
             ...secondIntervalMillisUntilFire.map(delayedTriggeredEvent),
         ])
@@ -247,12 +212,12 @@ describe('ExtensionUserActivity', function () {
     describe('does not fire user activity events in specific scenarios', function () {
         let userActivitySubscriber: sinon.SinonStubbedMember<() => void>
         let _triggerUserActivity: (obj: any) => void
-        let instance: ExtensionUserActivity
+        let instance: UserActivity
 
         beforeEach(function () {
             userActivitySubscriber = sandbox.stub()
             _triggerUserActivity = () => {
-                throw Error('Called before ExtensionUserActivity was instantiated')
+                throw Error('Called before UserActivity was instantiated')
             }
         })
 
@@ -354,11 +319,10 @@ describe('ExtensionUserActivity', function () {
         }
 
         function createTriggerActivityFunc() {
-            instance = new ExtensionUserActivity(0)
+            instance = new UserActivity(0)
             instance.onUserActivity(userActivitySubscriber)
-            // Creation of the ExtensionUserActivity instance
-            // will call the stubbed event and set the value
-            // for _triggerUserActivity
+            // Creation of the UserActivity instance will call the stubbed event and set the value
+            // for _triggerUserActivity.
             return _triggerUserActivity
         }
     })

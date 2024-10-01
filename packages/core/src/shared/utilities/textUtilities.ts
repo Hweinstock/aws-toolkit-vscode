@@ -127,7 +127,7 @@ export function stripNewLinesAndComments(text: string): string {
     const blockCommentRegExp = /\/\*.*\*\//
     let result: string = ''
 
-    text.split(/\r|\n/).map(s => {
+    text.split(/\r|\n/).map((s) => {
         const commentStart: number = s.search(/\/\//)
         s = s.replace(blockCommentRegExp, '')
         result += commentStart === -1 ? s : s.substring(0, commentStart)
@@ -154,7 +154,7 @@ export async function insertTextIntoFile(text: string, filePath: string, line: n
 
     fs.writeSync(fd, newData, 0, newData.length, 0)
 
-    fs.close(fd, err => {
+    fs.close(fd, (err) => {
         if (err) {
             throw err
         }
@@ -163,6 +163,31 @@ export async function insertTextIntoFile(text: string, filePath: string, line: n
 
 export function toTitleCase(str: string): string {
     return str.charAt(0).toUpperCase().concat(str.slice(1))
+}
+
+/**
+ * converts keys in an object from camelCase to snake_case
+ * e.g.
+ * {
+ *   fooBar: "fi"
+ * }
+ *
+ * to
+ * {
+ *   foo_bar: "fi"
+ * }
+ */
+export function toSnakeCase(obj: Record<string, any>) {
+    const snakeObj: Record<string, string> = {}
+
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const snakeKey = key.replace(/([a-z])([A-Z]+)/g, '$1_$2').toLowerCase()
+            snakeObj[snakeKey] = obj[key]
+        }
+    }
+
+    return snakeObj
 }
 
 /**
@@ -336,4 +361,37 @@ export function convertDateToTimestamp(date: Date) {
         hour: '2-digit',
         minute: '2-digit',
     })
+}
+
+/**
+ * A helper function to generate a random string for a specified length
+ *
+ * @param length - The length of the generated string. Defaults to 32 if length not provided.
+ */
+export function getRandomString(length = 32) {
+    let text = ''
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length))
+    }
+    return text
+}
+
+/**
+ * Convert a base 64 string to a base 64 url string
+ *
+ * See: https://datatracker.ietf.org/doc/html/rfc4648#section-5
+ * @param base64 a base 64 string
+ * @returns a base 64 url string
+ */
+export function toBase64URL(base64: string) {
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export function undefinedIfEmpty(str: string | undefined): string | undefined {
+    if (str && str.trim().length > 0) {
+        return str
+    }
+
+    return undefined
 }

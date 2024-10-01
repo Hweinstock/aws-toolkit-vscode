@@ -31,7 +31,7 @@ import {
 } from '../../shared/telemetry/telemetry'
 import { CodeWhispererCodeCoverageTracker } from '../tracker/codewhispererCodeCoverageTracker'
 import { invalidCustomizationMessage } from '../models/constants'
-import { switchToBaseCustomizationAndNotify } from '../util/customizationUtil'
+import { getSelectedCustomization, switchToBaseCustomizationAndNotify } from '../util/customizationUtil'
 import { session } from '../util/codeWhispererSession'
 import { Commands } from '../../shared/vscode/commands2'
 import globals from '../../shared/extensionGlobals'
@@ -58,10 +58,16 @@ const nextCommand = Commands.declare('editor.action.inlineSuggest.showNext', () 
     await RecommendationHandler.instance.showRecommendation(1)
 })
 
-const rejectCommand = Commands.declare('aws.codeWhisperer.rejectCodeSuggestion', () => async () => {
-    RecommendationHandler.instance.reportUserDecisions(-1)
+const rejectCommand = Commands.declare('aws.amazonq.rejectCodeSuggestion', () => async () => {
+    telemetry.record({
+        traceId: TelemetryHelper.instance.traceId,
+    })
 
-    await Commands.tryExecute('aws.codewhisperer.refreshAnnotation')
+    if (!isCloud9('any')) {
+        await vscode.commands.executeCommand('editor.action.inlineSuggest.hide')
+    }
+    RecommendationHandler.instance.reportUserDecisions(-1)
+    await Commands.tryExecute('aws.amazonq.refreshAnnotation')
 })
 
 const lock = new AsyncLock({ maxPending: 1 })
@@ -99,7 +105,7 @@ export class RecommendationHandler {
     }
 
     isValidResponse(): boolean {
-        return session.recommendations.some(r => r.content.trim() !== '')
+        return session.recommendations.some((r) => r.content.trim() !== '')
     }
 
     async getServerResponse(
@@ -221,7 +227,7 @@ export class RecommendationHandler {
                 )
                 const languageName = request.fileContext.programmingLanguage.languageName
                 if (!runtimeLanguageContext.isLanguageSupported(languageName)) {
-                    errorMessage = `${languageName} is currently not supported by CodeWhisperer`
+                    errorMessage = `${languageName} is currently not supported by Amazon Q inline suggestions`
                 }
                 return Promise.resolve<GetRecommendationsResponse>({
                     result: invocationResult,
@@ -263,7 +269,7 @@ export class RecommendationHandler {
             if (latency === 0) {
                 latency = startTime !== 0 ? performance.now() - startTime : 0
             }
-            getLogger().error('CodeWhisperer Invocation Exception : %s', (error as Error).message)
+            getLogger().error('amazonq inline-suggest: Invocation Exception : %s', (error as Error).message)
             if (isAwsError(error)) {
                 errorMessage = error.message
                 requestId = error.requestId || ''
@@ -272,15 +278,15 @@ export class RecommendationHandler {
                 await this.onThrottlingException(error, triggerType)
 
                 if (error?.code === 'AccessDeniedException' && errorMessage?.includes('no identity-based policy')) {
-                    getLogger().error('CodeWhisperer AccessDeniedException : %s', (error as Error).message)
+                    getLogger().error('amazonq inline-suggest: AccessDeniedException : %s', (error as Error).message)
                     void vscode.window
                         .showErrorMessage(`CodeWhisperer: ${error?.message}`, CodeWhispererConstants.settingsLearnMore)
-                        .then(async resp => {
+                        .then(async (resp) => {
                             if (resp === CodeWhispererConstants.settingsLearnMore) {
                                 void openUrl(vscode.Uri.parse(CodeWhispererConstants.learnMoreUri))
                             }
                         })
-                    await vscode.commands.executeCommand('aws.codeWhisperer.enableCodeSuggestions', false)
+                    await vscode.commands.executeCommand('aws.amazonq.enableCodeSuggestions', false)
                 }
             } else {
                 errorMessage = error instanceof Error ? error.message : String(error)
@@ -412,7 +418,7 @@ export class RecommendationHandler {
     }
 
     hasAtLeastOneValidSuggestion(typedPrefix: string): boolean {
-        return session.recommendations.some(r => r.content.trim() !== '' && r.content.startsWith(typedPrefix))
+        return session.recommendations.some((r) => r.content.trim() !== '' && r.content.startsWith(typedPrefix))
     }
 
     cancelPaginatedRequest() {
@@ -454,8 +460,7 @@ export class RecommendationHandler {
             this.cancelPaginatedRequest()
             this.clearRecommendations()
             this.disposeInlineCompletion()
-            await vscode.commands.executeCommand('aws.codeWhisperer.refreshStatusBar')
-            this.disposeCommandOverrides()
+            await vscode.commands.executeCommand('aws.amazonq.refreshStatusBar')
             // fix a regression that requires user to hit Esc twice to clear inline ghost text
             // because disposing a provider does not clear the UX
             if (isVscHavingRegressionInlineCompletionApi()) {
@@ -493,7 +498,7 @@ export class RecommendationHandler {
         if (isCloud9('any')) {
             this.clearRecommendations()
         } else if (isInlineCompletionEnabled()) {
-            this.clearInlineCompletionStates().catch(e => {
+            this.clearInlineCompletionStates().catch((e) => {
                 getLogger().error('clearInlineCompletionStates failed: %s', (e as Error).message)
             })
         }
@@ -557,7 +562,6 @@ export class RecommendationHandler {
                 void vscode.window.showErrorMessage(CodeWhispererConstants.freeTierLimitReached)
             }
             vsCodeState.isFreeTierLimitReached = true
-            await Commands.tryExecute('aws.amazonq.refresh')
         }
     }
 
@@ -634,12 +638,14 @@ export class RecommendationHandler {
     }
 
     async onCursorChange(e: vscode.TextEditorSelectionChangeEvent) {
-        // e.kind will be 1 for keyboard cursor change events
         // we do not want to reset the states for keyboard events because they can be typeahead
-        if (e.kind !== 1 && vscode.window.activeTextEditor === e.textEditor) {
+        if (
+            e.kind !== vscode.TextEditorSelectionChangeKind.Keyboard &&
+            vscode.window.activeTextEditor === e.textEditor
+        ) {
             application()._clearCodeWhispererUIListener.fire()
             // when cursor change due to mouse movement we need to reset the active item index for inline
-            if (e.kind === 2) {
+            if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse) {
                 this.inlineCompletionProvider?.clearActiveItemIndex()
             }
         }
@@ -655,9 +661,7 @@ export class RecommendationHandler {
             return
         }
         if (this.isSuggestionVisible()) {
-            // to force refresh the visual cue so that the total recommendation count can be updated
-            // const index = this.inlineCompletionProvider?.getActiveItemIndex
-            await this.showRecommendation(0, false)
+            // do not force refresh the tooltip to avoid suggestion "flashing"
             return
         }
         if (
@@ -669,8 +673,6 @@ export class RecommendationHandler {
             })
             this.reportUserDecisions(-1)
         } else if (session.recommendations.length > 0) {
-            this.subscribeSuggestionCommands()
-            // await this.startRejectionTimer(editor)
             await this.showRecommendation(0, true)
         }
     }
@@ -695,6 +697,7 @@ export class RecommendationHandler {
                 codewhispererSessionId: session.sessionId,
                 codewhispererTriggerType: session.triggerType,
                 codewhispererCompletionType: session.getCompletionType(0),
+                codewhispererCustomizationArn: getSelectedCustomization().arn,
                 codewhispererLanguage: languageContext.language,
                 duration: performance.now() - this.lastInvocationTime,
                 passive: true,

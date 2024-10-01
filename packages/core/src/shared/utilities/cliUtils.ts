@@ -13,7 +13,7 @@ import { getIdeProperties } from '../extensionUtilities'
 import { makeTemporaryToolkitFolder, tryRemoveFolder } from '../filesystemUtilities'
 import { getLogger } from '../logger'
 import { HttpResourceFetcher } from '../resourcefetcher/httpResourceFetcher'
-import { ChildProcess } from '../utilities/childProcess'
+import { ChildProcess } from './processUtils'
 
 import * as nls from 'vscode-nls'
 import { Timeout, CancellationError } from './timeoutUtils'
@@ -145,7 +145,7 @@ export async function installCli(cli: AwsClis, confirm: boolean): Promise<string
                 localize('AWS.cli.failedInstall', 'Installation of the {0} CLI failed.', cliToInstall.name),
                 manualInstall
             )
-            .then(button => {
+            .then((button) => {
                 if (button === manualInstall) {
                     void openUrl(vscode.Uri.parse(cliToInstall.manualInstallLink))
                 }
@@ -157,14 +157,14 @@ export async function installCli(cli: AwsClis, confirm: boolean): Promise<string
             getLogger().info('Cleaning up installer...')
             // nonblocking: use `then`
             tryRemoveFolder(tempDir).then(
-                success => {
+                (success) => {
                     if (success) {
                         getLogger().info('Removed installer.')
                     } else {
                         getLogger().warn(`installCli: failed to clean up temp directory: ${tempDir}`)
                     }
                 },
-                e => {
+                (e) => {
                     getLogger().error('installCli: tryRemoveFolder failed: %s', (e as Error).message)
                 }
             )
@@ -236,7 +236,7 @@ function getToolkitLocalCliPath(): string {
 }
 
 function handleError<T extends Promise<unknown>>(promise: T): T {
-    return promise.catch<never>(err => {
+    return promise.catch<never>((err) => {
         if (
             !(err instanceof CancellationError || err instanceof InstallerError || err instanceof InvalidPlatformError)
         ) {
@@ -258,7 +258,7 @@ async function installSsmCli(
     const finalPath = path.join(getToolkitLocalCliPath(), getOsCommand(awsClis['session-manager-plugin']))
     const TimedProcess = ChildProcess.extend({ timeout, rejectOnError: true, rejectOnErrorCode: true })
 
-    getLogger('channel').info(`Installing SSM CLI from ${ssmInstaller} to ${outDir}...`)
+    getLogger().info(`Installing SSM CLI from ${ssmInstaller} to ${outDir}...`)
     progress.report({ message: msgInstallingLocal })
 
     return handleError(install())
@@ -340,7 +340,7 @@ export async function getOrInstallCli(cli: AwsClis, confirm: boolean): Promise<s
 //     const awsInstaller = await downloadCliSource(AWS_CLIS.aws, tempDir)
 //     fs.chmodSync(awsInstaller, 0o700)
 
-//     getLogger('channel').info(`Installing AWS CLI from ${awsInstaller} to ${getToolkitCliDir()}...`)
+//     getLogger().info(`Installing AWS CLI from ${awsInstaller} to ${getToolkitCliDir()}...`)
 //     progress.report({ message: msgInstallingLocal })
 //     switch (process.platform) {
 //         case 'win32': {

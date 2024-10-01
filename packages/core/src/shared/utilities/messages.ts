@@ -6,7 +6,7 @@
 import * as vscode from 'vscode'
 import * as nls from 'vscode-nls'
 import * as localizedText from '../localizedText'
-import { getLogger, showLogOutputChannel } from '../../shared/logger'
+import { getLogger } from '../../shared/logger'
 import { ProgressEntry } from '../../shared/vscode/window'
 import { getIdeProperties, isCloud9 } from '../extensionUtilities'
 import { sleep } from './timeoutUtils'
@@ -15,7 +15,9 @@ import { addCodiconToString } from './textUtilities'
 import { getIcon, codicon } from '../icons'
 import globals from '../extensionGlobals'
 import { openUrl } from './vsCodeUtils'
-import { PromptSettings } from '../../shared/settings'
+import { AmazonQPromptSettings, ToolkitPromptSettings } from '../../shared/settings'
+import { telemetry } from '../telemetry/telemetry'
+import { vscodeComponent } from '../vscode/commands2'
 
 export const messages = {
     editCredentials(icon: boolean) {
@@ -74,7 +76,7 @@ export async function showMessageWithUrl(
     const items = [...extraItems, urlItem]
 
     const p = showMessageWithItems(message, kind, items, useModal)
-    return p.then<string | undefined>(selection => {
+    return p.then<string | undefined>((selection) => {
         if (selection === urlItem) {
             void openUrl(uri)
         }
@@ -101,9 +103,9 @@ export async function showViewLogsMessage(
     const items = [...extraItems, logsItem]
 
     const p = showMessageWithItems(message, kind, items)
-    return p.then<string | undefined>(selection => {
+    return p.then<string | undefined>((selection) => {
         if (selection === logsItem) {
-            showLogOutputChannel()
+            globals.logOutputChannel.show(true)
         }
         return selection
     })
@@ -152,25 +154,39 @@ export async function showReauthenticateMessage({
     message,
     connect,
     suppressId,
+    settings,
     reauthFunc,
+    source = vscodeComponent,
 }: {
     message: string
     connect: string
-    suppressId: Parameters<PromptSettings['isPromptEnabled']>[0]
+    suppressId: string // Parameters<PromptSettings['isPromptEnabled']>[0]
+    settings: AmazonQPromptSettings | ToolkitPromptSettings
     reauthFunc: () => Promise<void>
+    source?: string
 }) {
-    const settings = PromptSettings.instance
-    const shouldShow = await settings.isPromptEnabled(suppressId)
+    const shouldShow = await settings.isPromptEnabled(suppressId as any)
     if (!shouldShow) {
         return
     }
 
-    await vscode.window.showInformationMessage(message, connect, localizedText.dontShow).then(async resp => {
-        if (resp === connect) {
-            await reauthFunc()
-        } else if (resp === localizedText.dontShow) {
-            await settings.disablePrompt(suppressId)
-        }
+    await telemetry.toolkit_showNotification.run(async () => {
+        telemetry.record({ id: suppressId, source })
+        await vscode.window.showInformationMessage(message, connect, localizedText.dontShow).then(async (resp) => {
+            await telemetry.toolkit_invokeAction.run(async () => {
+                telemetry.record({ id: suppressId, source })
+
+                if (resp === connect) {
+                    telemetry.record({ action: 'connect' })
+                    await reauthFunc()
+                } else if (resp === localizedText.dontShow) {
+                    telemetry.record({ action: 'suppress' })
+                    await settings.disablePrompt(suppressId as any)
+                } else {
+                    telemetry.record({ action: 'dismiss' })
+                }
+            })
+        })
     })
 }
 
@@ -225,7 +241,8 @@ async function showProgressWithTimeout(
                         return new Promise(timeout.onCompletion)
                     })
                 } catch (e) {
-                    getLogger().error('report(): progressPromise failed', e)
+                    const err = e as Error
+                    getLogger().error('report(): progressPromise failed: %s: %s', err.name, err.message)
                     reject(e)
                 }
             }, showAfterMs)
@@ -347,17 +364,14 @@ export async function copyToClipboard(data: string, label?: string): Promise<voi
     getLogger().verbose('copied %s to clipboard: %O', label ?? '', data)
 }
 
-export async function showOnce<T>(
-    key: string,
-    fn: () => Promise<T>,
-    memento = globals.context.globalState
-): Promise<T | undefined> {
-    if (memento.get(key)) {
+/** TODO: eliminate this, callers should use `PromptSettings` instead. */
+export async function showOnce<T>(key: 'sam.sync.updateMessage', fn: () => Promise<T>): Promise<T | undefined> {
+    if (globals.globalState.tryGet(key, Boolean, false)) {
         return
     }
 
     const result = fn()
-    await memento.update(key, true)
+    await globals.globalState.update(key, true)
 
     return result
 }

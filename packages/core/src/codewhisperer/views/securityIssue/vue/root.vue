@@ -2,9 +2,9 @@
 
 <template>
     <div class="mb-16">
-        <div class="container button-container" style="justify-content: space-between">
+        <div class="container button-container" style="justify-content: space-between; top: 0">
             <h1>{{ title }} <img class="severity" :src="severityImage" :alt="severity" /></h1>
-            <input v-if="isFixAvailable" class="mt-4 ml-16" type="submit" @click="applyFix" value="Apply fix" />
+            <input v-if="isFixAvailable" class="mt-4 ml-16" type="submit" @click="applyFix" value="Fix" />
         </div>
 
         <div class="mt-16">
@@ -39,7 +39,8 @@
 
             <div>
                 <b>Detector library</b>
-                <p>
+                <p v-if="!detectorUrl || !detectorUrl.length">-</p>
+                <p v-else>
                     <a :href="detectorUrl">
                         {{ detectorName }} <span class="icon icon-sm icon-vscode-link-external"></span>
                     </a>
@@ -65,6 +66,12 @@
                 <span>{{ suggestedFixDescription }}</span>
             </div>
         </div>
+    </div>
+
+    <hr />
+
+    <div class="mt-16 mb-16">
+        <input type="submit" class="mr-8" @click="explainWithQ" value="Explain" />
     </div>
 </template>
 
@@ -107,6 +114,7 @@ export default defineComponent({
             title: '',
             detectorId: '',
             detectorName: '',
+            detectorUrl: '',
             severity: '',
             recommendationText: '',
             suggestedFix: '',
@@ -134,6 +142,7 @@ export default defineComponent({
                 this.title = issue.title
                 this.detectorId = issue.detectorId
                 this.detectorName = issue.detectorName
+                this.detectorUrl = issue.recommendation.url
                 this.relatedVulnerabilities = issue.relatedVulnerabilities
                 this.severity = issue.severity
                 this.recommendationText = issue.recommendation.text
@@ -160,6 +169,9 @@ export default defineComponent({
         applyFix() {
             client.applyFix()
         },
+        explainWithQ() {
+            client.explainWithQ()
+        },
         navigateToFile() {
             client.navigateToFile()
         },
@@ -167,10 +179,6 @@ export default defineComponent({
     computed: {
         severityImage() {
             return severityImages[this.severity.toLowerCase()]
-        },
-        detectorUrl() {
-            const slug = this.detectorId.split('@').shift()
-            return `https://docs.aws.amazon.com/codeguru/detector-library/${slug}`
         },
         recommendationTextHtml() {
             return md.render(this.recommendationText)

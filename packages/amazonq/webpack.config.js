@@ -3,29 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * This is the final webpack config that collects all webpack configs.
- */
-
 const baseConfigFactory = require('../webpack.base.config')
-const baseVueConfigFactory = require('../webpack.vue.config')
+const baseWebConfigsFactory = require('../webpack.web.config')
 
 module.exports = (env, argv) => {
     const config = {
         ...baseConfigFactory(env, argv),
         entry: {
-            'src/extension': './src/extension.ts',
+            'src/extensionNode': './src/extensionNode.ts',
         },
     }
 
-    const vue = baseVueConfigFactory(env, argv)
-    const vueConfig = {
-        ...vue.config,
+    const webConfig = {
+        ...baseWebConfigsFactory(env, argv),
         entry: {
-            ...vue.createVueEntries(),
-            //'src/amazonq/webview/ui/amazonq-ui': './src/amazonq/webview/ui/main.ts',
+            'src/extensionWeb': './src/extensionWeb.ts',
+            'test/web/testRunnerWebCore': './test/web/testRunner.ts',
         },
     }
 
-    return [config, vueConfig]
+    return [config, webConfig]
 }

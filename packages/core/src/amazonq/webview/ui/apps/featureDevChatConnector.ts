@@ -23,7 +23,12 @@ export interface ConnectorProps {
     sendFeedback?: (tabId: string, feedbackPayload: FeedbackPayload) => void | undefined
     onError: (tabID: string, message: string, title: string) => void
     onWarning: (tabID: string, message: string, title: string) => void
-    onFileComponentUpdate: (tabID: string, filePaths: DiffTreeFileInfo[], deletedFiles: DiffTreeFileInfo[]) => void
+    onFileComponentUpdate: (
+        tabID: string,
+        filePaths: DiffTreeFileInfo[],
+        deletedFiles: DiffTreeFileInfo[],
+        messageId: string
+    ) => void
     onFileActionClick: (tabID: string, messageId: string, filePath: string, actionName: string) => void
     onUpdatePlaceholder: (tabID: string, newPlaceholder: string) => void
     onChatInputEnabled: (tabID: string, enabled: boolean) => void
@@ -136,6 +141,7 @@ export class Connector {
                 messageId: messageData.messageID ?? messageData.triggerID ?? '',
                 relatedContent: undefined,
                 canBeVoted: messageData.canBeVoted,
+                snapToTop: messageData.snapToTop,
                 followUp:
                     messageData.followUps !== undefined && messageData.followUps.length > 0
                         ? {
@@ -155,7 +161,7 @@ export class Connector {
         if (this.onChatAnswerReceived !== undefined) {
             const actions = getActions([...messageData.filePaths, ...messageData.deletedFiles])
             const answer: ChatItem = {
-                type: ChatItemType.CODE_RESULT,
+                type: ChatItemType.ANSWER,
                 relatedContent: undefined,
                 followUp: undefined,
                 canBeVoted: true,
@@ -163,6 +169,7 @@ export class Connector {
                 // TODO get the backend to store a message id in addition to conversationID
                 messageId: messageData.messageID ?? messageData.triggerID ?? messageData.conversationID,
                 fileList: {
+                    rootFolderTitle: 'Changes',
                     filePaths: messageData.filePaths.map((f: DiffTreeFileInfo) => f.zipFilePath),
                     deletedFiles: messageData.deletedFiles.map((f: DiffTreeFileInfo) => f.zipFilePath),
                     actions,
@@ -197,7 +204,12 @@ export class Connector {
 
     handleMessageReceive = async (messageData: any): Promise<void> => {
         if (messageData.type === 'updateFileComponent') {
-            this.onFileComponentUpdate(messageData.tabID, messageData.filePaths, messageData.deletedFiles)
+            this.onFileComponentUpdate(
+                messageData.tabID,
+                messageData.filePaths,
+                messageData.deletedFiles,
+                messageData.messageId
+            )
             return
         }
         if (messageData.type === 'errorMessage') {
@@ -275,7 +287,12 @@ export class Connector {
     }
 
     sendFeedback = (tabId: string, feedbackPayload: FeedbackPayload): void | undefined => {
-        // TODO implement telemetry
+        this.sendMessageToExtension({
+            command: 'chat-item-feedback',
+            ...feedbackPayload,
+            tabType: 'featuredev',
+            tabID: tabId,
+        })
     }
 
     onChatItemVoted = (tabId: string, messageId: string, vote: string): void | undefined => {

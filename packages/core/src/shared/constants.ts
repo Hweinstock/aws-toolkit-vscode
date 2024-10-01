@@ -7,7 +7,6 @@ import * as vscode from 'vscode'
 
 import { isCloud9 } from './extensionUtilities'
 
-export const regionSettingKey = 'region'
 export const profileSettingKey = 'profile'
 export const productName: string = 'aws-toolkit-vscode'
 
@@ -135,3 +134,7 @@ export const redshiftHelpUrl = 'https://docs.aws.amazon.com/toolkit-for-vscode/l
 
 // URL for Amazon Q
 export const amazonQHelpUrl = 'https://aws.amazon.com/q/'
+
+// URL for Amazon Q VS Code
+export const amazonQVscodeMarketplace =
+    'https://marketplace.visualstudio.com/items?itemName=AmazonWebServices.amazon-q-vscode'

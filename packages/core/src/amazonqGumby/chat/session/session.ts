@@ -10,6 +10,7 @@ export enum ConversationState {
     PROMPT_JAVA_HOME,
     COMPILING,
     JOB_SUBMITTED,
+    WAITING_FOR_INPUT,
 }
 
 export interface ProjectDetails {
@@ -41,7 +42,7 @@ export class Session {
 
     public updateCandidateProjects(newCandidateProjects: TransformationCandidateProject[]) {
         this.candidateProjects = new Map<string, TransformationCandidateProject>()
-        newCandidateProjects.map(candidateProject => {
+        newCandidateProjects.map((candidateProject) => {
             this.candidateProjects.set(candidateProject.path, candidateProject)
         })
     }

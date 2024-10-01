@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import assert from 'assert'
+import assert, { fail } from 'assert'
 import * as vscode from 'vscode'
 import * as fs from 'fs-extra'
 import * as sinon from 'sinon'
 import { makeTemporaryToolkitFolder } from '../../../shared/filesystemUtilities'
-import * as model from '../../../codewhisperer/models/model'
-import * as startTransformByQ from '../../../codewhisperer/commands/startTransformByQ'
+import { transformByQState, TransformByQStoppedError } from '../../../codewhisperer/models/model'
+import { parseBuildFile, stopTransformByQ } from '../../../codewhisperer/commands/startTransformByQ'
 import { HttpResponse } from 'aws-sdk'
 import * as codeWhisperer from '../../../codewhisperer/client/codewhisperer'
 import * as CodeWhispererConstants from '../../../codewhisperer/models/constants'
@@ -27,19 +27,23 @@ import {
     pollTransformationJob,
     getHeadersObj,
     throwIfCancelled,
+    updateJobHistory,
     zipCode,
+    getTableMapping,
 } from '../../../codewhisperer/service/transformByQ/transformApiHandler'
 import {
     validateOpenProjects,
     getOpenProjects,
 } from '../../../codewhisperer/service/transformByQ/transformProjectValidationHandler'
-import { TransformationCandidateProject } from '../../../codewhisperer/models/model'
+import { TransformationCandidateProject, ZipManifest } from '../../../codewhisperer/models/model'
+import globals from '../../../shared/extensionGlobals'
 
 describe('transformByQ', function () {
     let tempDir: string
 
     beforeEach(async function () {
         tempDir = await makeTemporaryToolkitFolder()
+        transformByQState.setToNotStarted()
     })
 
     afterEach(async function () {
@@ -69,16 +73,16 @@ describe('transformByQ', function () {
     })
 
     it('WHEN job status is cancelled THEN error is thrown', async function () {
-        model.transformByQState.setToCancelled()
+        transformByQState.setToCancelled()
         assert.throws(() => {
             throwIfCancelled()
-        }, new model.TransformByQStoppedError())
+        }, new TransformByQStoppedError())
     })
 
     it('WHEN job is stopped THEN status is updated to cancelled', async function () {
-        model.transformByQState.setToRunning()
-        await startTransformByQ.stopTransformByQ('abc-123')
-        assert.strictEqual(model.transformByQState.getStatus(), 'Cancelled')
+        transformByQState.setToRunning()
+        await stopTransformByQ('abc-123')
+        assert.strictEqual(transformByQState.getStatus(), 'Cancelled')
     })
 
     it('WHEN validateProjectSelection called on non-Java project THEN throws error', async function () {
@@ -128,16 +132,16 @@ describe('transformByQ', function () {
         }, NoOpenProjectsError)
     })
 
+    it('WHEN stop job called with invalid jobId THEN stop API not called', async function () {
+        const stopJobStub = sinon.stub(codeWhisperer.codeWhispererClient, 'codeModernizerStopCodeTransformation')
+        await stopJob('')
+        sinon.assert.notCalled(stopJobStub)
+    })
+
     it('WHEN stop job called with valid jobId THEN stop API called', async function () {
         const stopJobStub = sinon.stub(codeWhisperer.codeWhispererClient, 'codeModernizerStopCodeTransformation')
         await stopJob('dummyId')
         sinon.assert.calledWithExactly(stopJobStub, { transformationJobId: 'dummyId' })
-    })
-
-    it('WHEN stop job that has not been started THEN stop API not called', async function () {
-        const stopJobStub = sinon.stub(codeWhisperer.codeWhispererClient, 'codeModernizerStopCodeTransformation')
-        await stopJob('')
-        sinon.assert.notCalled(stopJobStub)
     })
 
     it('WHEN polling completed job THEN returns status as completed', async function () {
@@ -157,30 +161,26 @@ describe('transformByQ', function () {
             transformationJob: { status: 'COMPLETED' },
         }
         sinon.stub(codeWhisperer.codeWhispererClient, 'codeModernizerGetCodeTransformation').resolves(mockJobResponse)
-        model.transformByQState.setToSucceeded()
+        transformByQState.setToSucceeded()
         const status = await pollTransformationJob('dummyId', CodeWhispererConstants.validStatesForCheckingDownloadUrl)
         assert.strictEqual(status, 'COMPLETED')
     })
 
-    it(`WHEN process history called THEN returns details of last run job`, async function () {
-        const actual = startTransformByQ.processHistory(
-            [],
-            '01/01/23, 12:00 AM',
-            'my-module',
-            'Succeeded',
-            '20 sec',
-            '123'
-        )
-        const expected = [
-            {
-                timestamp: '01/01/23, 12:00 AM',
-                module: 'my-module',
-                status: 'Succeeded',
-                duration: '20 sec',
-                id: '123',
+    it(`WHEN update job history called THEN returns details of last run job`, async function () {
+        transformByQState.setJobId('abc-123')
+        transformByQState.setProjectName('test-project')
+        transformByQState.setPolledJobStatus('COMPLETED')
+        transformByQState.setStartTime('05/03/24, 11:35 AM')
+        const actual = updateJobHistory()
+        const expected = {
+            'abc-123': {
+                duration: '0 sec',
+                projectName: 'test-project',
+                startTime: '05/03/24, 11:35 AM',
+                status: 'COMPLETED',
             },
-        ]
-        assert.deepStrictEqual(actual, expected)
+        }
+        assert.equal(actual['abc-123'].projectName, expected['abc-123'].projectName)
     })
 
     it(`WHEN get headers for upload artifact to S3 THEN returns correct header with kms key arn`, function () {
@@ -201,6 +201,32 @@ describe('transformByQ', function () {
             'Content-Type': 'application/zip',
         }
         assert.deepStrictEqual(actual, expected)
+    })
+
+    it(`WHEN zip created THEN manifest.json contains test-compile custom build command`, async function () {
+        const tempFileName = `testfile-${globals.clock.Date.now()}.zip`
+        transformByQState.setProjectPath(tempDir)
+        const transformManifest = new ZipManifest()
+        transformManifest.customBuildCommand = CodeWhispererConstants.skipUnitTestsBuildCommand
+        return zipCode({
+            dependenciesFolder: {
+                path: tempDir,
+                name: tempFileName,
+            },
+            humanInTheLoopFlag: false,
+            modulePath: tempDir,
+            zipManifest: transformManifest,
+        }).then((zipCodeResult) => {
+            const zip = new AdmZip(zipCodeResult.tempFilePath)
+            const manifestEntry = zip.getEntry('manifest.json')
+            if (!manifestEntry) {
+                fail('manifest.json not found in the zip')
+            }
+            const manifestBuffer = manifestEntry.getData()
+            const manifestText = manifestBuffer.toString('utf8')
+            const manifest = JSON.parse(manifestText)
+            assert.strictEqual(manifest.customBuildCommand, CodeWhispererConstants.skipUnitTestsBuildCommand)
+        })
     })
 
     it(`WHEN zip created THEN dependencies contains no .sha1 or .repositories files`, async function () {
@@ -228,28 +254,91 @@ describe('transformByQ', function () {
             'resolver-status.properties',
         ]
 
-        m2Folders.forEach(folder => {
+        m2Folders.forEach((folder) => {
             const folderPath = path.join(tempDir, folder)
             fs.mkdirSync(folderPath, { recursive: true })
-            filesToAdd.forEach(file => {
+            filesToAdd.forEach((file) => {
                 fs.writeFileSync(path.join(folderPath, file), 'sample content for the test file')
             })
         })
 
-        const tempFileName = `testfile-${Date.now()}.zip`
-        model.transformByQState.setProjectPath(tempDir)
+        const tempFileName = `testfile-${globals.clock.Date.now()}.zip`
+        transformByQState.setProjectPath(tempDir)
         return zipCode({
-            path: tempDir,
-            name: tempFileName,
-        }).then(zipFile => {
-            const zip = new AdmZip(zipFile)
-            const dependenciesToUpload = zip.getEntries().filter(entry => entry.entryName.startsWith('dependencies'))
+            dependenciesFolder: {
+                path: tempDir,
+                name: tempFileName,
+            },
+            humanInTheLoopFlag: false,
+            modulePath: tempDir,
+            zipManifest: new ZipManifest(),
+        }).then((zipCodeResult) => {
+            const zip = new AdmZip(zipCodeResult.tempFilePath)
+            const dependenciesToUpload = zip.getEntries().filter((entry) => entry.entryName.startsWith('dependencies'))
             // Each dependency version folder contains each expected file, thus we multiply
             const expectedNumberOfDependencyFiles = m2Folders.length * expectedFilesAfterClean.length
             assert.strictEqual(expectedNumberOfDependencyFiles, dependenciesToUpload.length)
-            dependenciesToUpload.forEach(dependency => {
+            dependenciesToUpload.forEach((dependency) => {
                 assert(expectedFilesAfterClean.includes(dependency.name))
             })
         })
+    })
+
+    it(`WHEN getTableMapping on complete step 0 progressUpdates THEN map IDs to tables`, async function () {
+        const stepZeroProgressUpdates = [
+            {
+                name: '0',
+                status: 'COMPLETED',
+                description:
+                    '{"columnNames":["name","value"],"rows":[{"name":"Lines of code in your application","value":"3000"},{"name":"Dependencies to be replaced","value":"5"},{"name":"Deprecated code instances to be replaced","value":"10"},{"name":"Files to be updated","value":"7"}]}',
+            },
+            {
+                name: '1-dependency-change-abc',
+                status: 'COMPLETED',
+                description:
+                    '{"columnNames":["dependencyName","action","currentVersion","targetVersion"],"rows":[{"dependencyName":"org.springboot.com","action":"Update","currentVersion":"2.1","targetVersion":"2.4"}, {"dependencyName":"com.lombok.java","action":"Remove","currentVersion":"1.7","targetVersion":"-"}]}',
+            },
+            {
+                name: '2-deprecated-code-xyz',
+                status: 'COMPLETED',
+                description:
+                    '{"columnNames":["apiFullyQualifiedName","numChangedFiles"],“rows”:[{"apiFullyQualifiedName":"java.lang.Thread.stop()","numChangedFiles":"6"}, {"apiFullyQualifiedName":"java.math.bad()","numChangedFiles":"3"}]}',
+            },
+            {
+                name: '-1',
+                status: 'COMPLETED',
+                description:
+                    '{"columnNames":["relativePath","action"],"rows":[{"relativePath":"pom.xml","action":"Update"}, {"relativePath":"src/main/java/com/bhoruka/bloodbank/BloodbankApplication.java","action":"Update"}]}',
+            },
+        ]
+
+        const actual = getTableMapping(stepZeroProgressUpdates)
+        const expected = {
+            '0': '{"columnNames":["name","value"],"rows":[{"name":"Lines of code in your application","value":"3000"},{"name":"Dependencies to be replaced","value":"5"},{"name":"Deprecated code instances to be replaced","value":"10"},{"name":"Files to be updated","value":"7"}]}',
+            '1-dependency-change-abc':
+                '{"columnNames":["dependencyName","action","currentVersion","targetVersion"],"rows":[{"dependencyName":"org.springboot.com","action":"Update","currentVersion":"2.1","targetVersion":"2.4"}, {"dependencyName":"com.lombok.java","action":"Remove","currentVersion":"1.7","targetVersion":"-"}]}',
+            '2-deprecated-code-xyz':
+                '{"columnNames":["apiFullyQualifiedName","numChangedFiles"],“rows”:[{"apiFullyQualifiedName":"java.lang.Thread.stop()","numChangedFiles":"6"}, {"apiFullyQualifiedName":"java.math.bad()","numChangedFiles":"3"}]}',
+            '-1': '{"columnNames":["relativePath","action"],"rows":[{"relativePath":"pom.xml","action":"Update"}, {"relativePath":"src/main/java/com/bhoruka/bloodbank/BloodbankApplication.java","action":"Update"}]}',
+        }
+        assert.deepStrictEqual(actual, expected)
+    })
+
+    it(`WHEN codeTransformBillingText on small project THEN correct string returned`, async function () {
+        const expected =
+            '<p>376 lines of code were submitted for transformation. If you reach the quota for lines of code included in your subscription, you will be charged $0.003 for each additional line of code. You might be charged up to $1.13 for this transformation. To avoid being charged, stop the transformation job before it completes. For more information on pricing and quotas, see [Amazon Q Developer pricing](https://aws.amazon.com/q/developer/pricing/).</p>'
+        const actual = CodeWhispererConstants.codeTransformBillingText(376)
+        assert.strictEqual(actual, expected)
+    })
+
+    it(`WHEN parseBuildFile on pom.xml with absolute path THEN absolute path detected`, async function () {
+        const dirPath = await createTestWorkspaceFolder()
+        transformByQState.setProjectPath(dirPath.uri.fsPath)
+        const pomPath = path.join(dirPath.uri.fsPath, 'pom.xml')
+        await toFile('<project><properties><path>system/name/here</path></properties></project>', pomPath)
+        const expectedWarning =
+            'I detected 1 potential absolute file path(s) in your pom.xml file: **system/**. Absolute file paths might cause issues when I build your code. Any errors will show up in the build log.'
+        const warningMessage = await parseBuildFile()
+        assert.strictEqual(expectedWarning, warningMessage)
     })
 })

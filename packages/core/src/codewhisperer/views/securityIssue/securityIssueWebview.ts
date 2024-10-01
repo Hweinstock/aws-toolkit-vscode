@@ -33,7 +33,14 @@ export class SecurityIssueWebview extends VueWebview {
 
     public applyFix() {
         const args: [CodeScanIssue | undefined, string | undefined, Component] = [this.issue, this.filePath, 'webview']
-        void vscode.commands.executeCommand('aws.codeWhisperer.applySecurityFix', ...args)
+        void vscode.commands.executeCommand('aws.amazonq.applySecurityFix', ...args)
+    }
+
+    public explainWithQ() {
+        const args = [this.issue]
+        void this.navigateToFile()?.then(() => {
+            void vscode.commands.executeCommand('aws.amazonq.explainIssue', ...args)
+        })
     }
 
     public getRelativePath() {
@@ -46,7 +53,7 @@ export class SecurityIssueWebview extends VueWebview {
     public navigateToFile() {
         if (this.issue && this.filePath) {
             const range = new vscode.Range(this.issue.startLine, 0, this.issue.endLine, 0)
-            return vscode.workspace.openTextDocument(this.filePath).then(doc => {
+            return vscode.workspace.openTextDocument(this.filePath).then((doc) => {
                 void vscode.window.showTextDocument(doc, {
                     selection: range,
                     viewColumn: vscode.ViewColumn.One,
@@ -72,7 +79,7 @@ export async function showSecurityIssueWebview(ctx: vscode.ExtensionContext, iss
     activePanel.server.setFilePath(filePath)
 
     const webviewPanel = await activePanel.show({
-        title: 'CodeWhisperer Security Issue',
+        title: 'Amazon Q Security Issue',
         viewColumn: vscode.ViewColumn.Beside,
         cssFiles: ['securityIssue.css'],
     })

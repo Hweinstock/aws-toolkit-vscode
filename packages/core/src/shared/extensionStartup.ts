@@ -9,7 +9,7 @@ import * as vscode from 'vscode'
 import * as nls from 'vscode-nls'
 
 import { BaseTemplates } from './templates/baseTemplates'
-import { fsCommon } from '../srcShared/fs'
+import { fs } from '../shared/fs/fs'
 import { getIdeProperties, isCloud9, isCn } from './extensionUtilities'
 
 const localize = nls.loadMessageBundle()
@@ -24,7 +24,7 @@ export async function showQuickStartWebview(context: vscode.ExtensionContext): P
         const view = await createQuickStartWebview(context)
         view.reveal()
     } catch {
-        await vscode.window.showErrorMessage(
+        void vscode.window.showErrorMessage(
             localize('AWS.command.quickStart.error', 'Error while loading Quick Start page')
         )
     }
@@ -60,7 +60,7 @@ export async function createQuickStartWebview(
     const baseTemplateFn = _.template(BaseTemplates.simpleHtml)
 
     const htmlBody = convertExtensionRootTokensToPath(
-        await fsCommon.readFileAsString(path.join(context.extensionPath, actualPage)),
+        await fs.readFileAsString(path.join(context.extensionPath, actualPage)),
         context.extensionPath,
         view.webview
     )

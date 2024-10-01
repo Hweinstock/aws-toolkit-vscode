@@ -1,27 +1,29 @@
+[![Twitter Follow](https://img.shields.io/badge/follow-@aws-1DA1F2?style=flat-square&logo=aws&logoColor=white&label=Follow)](https://x.com/awscloud)
+[![Youtube Channel Views](https://img.shields.io/youtube/channel/views/UCd6MoB9NC6uYN2grvUNT-Zg?style=flat-square&logo=youtube&label=Youtube)](https://www.youtube.com/@amazonwebservices)
+![Marketplace Installs](https://img.shields.io/vscode-marketplace/i/AmazonWebServices.aws-toolkit-vscode.svg?label=Installs&style=flat-square)
+
+# Amazon Q and CodeWhisperer
+
+Amazon CodeWhisperer is now part of Amazon Q. [Try the Amazon Q extension](https://marketplace.visualstudio.com/items?itemName=AmazonWebServices.amazon-q-vscode).
+
+# Getting Started
+
+1. Open the AWS Toolkit extension
+2. Sign in with your AWS credentials
+
+![getting-started](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/auth-Toolkit.gif)
+
 The AWS Toolkit lets you interact with AWS directly from VS Code. Ready to install? See [Getting Started](#getting-started).
 
-## [Amazon Q (preview)](https://aws.amazon.com/q/)
+# Features
 
-Amazon Q is your conversational assistant for building, maintaining, and transforming applications. Amazon Q can do the following from the IDE:
+## [Threat Composer](https://github.com/awslabs/threat-composer#readme)
 
--   Answer questions about AWS
--   Answer questions about general programming concepts
--   Explain what a line of code or code function does
--   Write unit tests and code
--   Debug and fix code
--   Refactor code
+Integrate threat modeling practices into your development workflow by creating and version controlling your threat models as code.
 
-![Amazon Q](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/codewhispererChat.gif)
+Threat Composer for the AWS Toolkit for Visual Studio Code allows you to create, view and edit [Threat Composer](https://github.com/awslabs/threat-composer#readme) threat models `.tc.json` directly within VSCode.
 
-## [Amazon CodeWhisperer](https://aws.amazon.com/codewhisperer/)
-
-An AI powered productivity tool for the IDE.
-
--   **Real-time code suggestions** - automatic code recommendations in 15+ languages, now including infrastructure as code (CloudFormation, AWS CDK, and Terraform)
--   **Optimized for use with AWS services** - code suggestions are optimized for AWS APIs including Amazon Elastic Compute Cloud (Amazon EC2), AWS Lambda, and Amazon Simple Storage Service (Amazon S3)
--   **Built-in security scans** - Scan your code to detect hard-to-find vulnerabilities and get code suggestions to remediate them immediately
-
-![CodeWhisperer](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/codewhisperer.gif)
+![Threat Composer](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/threatComposer.gif)
 
 ## [Application Composer](https://aws.amazon.com/application-composer/)
 
@@ -31,43 +33,41 @@ AWS Application Composer maintains a real-time visual representation of your app
 -   Use the right tool for the task, including visual, code, or generative AI powered code suggestions in your IDE.
 -   Integrate with Workflow Studio to visually orchestrate over 220 AWS services or public http endpoints with Step Functions workflows.
 
-![Application Composer](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/appComposer.gif)
+![Application Composer](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/appComposer.gif)
 
-## [**Amazon CodeCatalyst**](https://codecatalyst.aws/explore)
+## [Amazon CodeCatalyst](https://codecatalyst.aws/explore)
 
 Unified software development service to quickly build and deliver applications on AWS.
 
 **Dev Environments** - launch VS Code in a cloud development environment, available on-demand in the cloud and automatically created with branch code and consistent project settings, providing faster setup, development, and testing
 
-![CodeCatalyst](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/CC_dev_env.gif)
-
 ## View, modify, and deploy AWS resources
 
 **Multiple AWS accounts and regions** - access AWS resources across your accounts and regions
 
-![creds](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/creds.gif)
+![creds](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/creds.gif)
 
 **S3 support** - view, create, and edit S3 buckets, folders, and files
 
-![S3](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/S3.gif)
+![S3](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/S3.gif)
 
 **Lambda** - download & upload Lambda functions
 
-![download-Lambda](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/download-Lambda.gif)
+![download-Lambda](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/download-Lambda.gif)
 
 ## Troubleshoot AWS from the IDE
 
 **Lambda** - step-through AWS Lambda functions using the VS Code debugger
 
-![Lambda_step_through_debugging](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/Lambda_step_through_debugging.gif)
+![Lambda_step_through_debugging](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/Lambda_step_through_debugging.gif)
 
 **CloudWatch** - find logs generated by your AWS resources
 
-![cw_logs](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/cw_logs.gif)
+![cw_logs](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/cw_logs.gif)
 
 **ECS** - execute commands against running ECS containers (or open a terminal)
 
-![ecs-terminal](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/ecs-terminal.gif)
+![ecs-terminal](https://raw.githubusercontent.com/aws/aws-toolkit-vscode/HEAD/docs/marketplace/vscode/ecs-terminal.gif)
 
 ## More features
 
@@ -79,16 +79,8 @@ Unified software development service to quickly build and deliver applications o
 
 For a full list of features, visit [our documentation](https://docs.aws.amazon.com/toolkit-for-vscode/latest/userguide/working-with-aws.html).
 
-## Getting Started
-
-1. Open the AWS Toolkit extension
-2. Add AWS credentials
-    1. **AWS resources** - connect using IAM credentials or IAM Identity Center (formerly SSO)
-    2. **CodeWhisperer** - connect using AWS Builder ID or IAM Identity Center (formerly SSO)
-    3. **CodeCatalyst** - connect using AWS Builder ID
-
-![getting-started](https://github.com/aws/aws-toolkit-vscode/raw/HEAD/docs/marketplace/vscode/getting-started.gif)
-
 ## Troubleshooting
 
 Submit bug reports and feature requests [on our Github repository](https://github.com/aws/aws-toolkit-vscode/issues/new/choose).
+
+Looking for Amazon Q or CodeWhisperer? [Try the Amazon Q extension](https://marketplace.visualstudio.com/items?itemName=AmazonWebServices.amazon-q-vscode).

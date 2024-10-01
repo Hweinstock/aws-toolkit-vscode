@@ -6,15 +6,15 @@ import * as vscode from 'vscode'
 import { ToolkitError } from '../../shared/errors'
 import { getIcon } from '../../shared/icons'
 import {
+    CodewhispererCodeScanScope,
     CodewhispererCompletionType,
     CodewhispererLanguage,
     CodewhispererTriggerType,
+    MetricBase,
     Result,
 } from '../../shared/telemetry/telemetry'
 import { References } from '../client/codewhisperer'
 import globals from '../../shared/extensionGlobals'
-import { autoTriggerEnabledKey } from './constants'
-import { get, set } from '../util/commonUtil'
 import { ChatControllerEventEmitters } from '../../amazonqGumby/chat/controller/controller'
 import { TransformationSteps } from '../client/codewhispereruserclient'
 
@@ -74,7 +74,6 @@ export interface GetRecommendationsResponse {
 
 /** Manages the state of CodeWhisperer code suggestions */
 export class CodeSuggestionsState {
-    #context: vscode.Memento
     /** The initial state if suggestion state was not defined */
     #fallback: boolean
     #onDidChangeState = new vscode.EventEmitter<boolean>()
@@ -86,15 +85,14 @@ export class CodeSuggestionsState {
         return (this.#instance ??= new this())
     }
 
-    protected constructor(context: vscode.Memento = globals.context.globalState, fallback: boolean = false) {
-        this.#context = context
+    protected constructor(fallback: boolean = true) {
         this.#fallback = fallback
     }
 
     async toggleSuggestions() {
         const autoTriggerEnabled = this.isSuggestionsEnabled()
         const toSet: boolean = !autoTriggerEnabled
-        await set(autoTriggerEnabledKey, toSet, this.#context)
+        await globals.globalState.update('CODEWHISPERER_AUTO_TRIGGER_ENABLED', toSet)
         this.#onDidChangeState.fire(toSet)
         return toSet
     }
@@ -106,8 +104,63 @@ export class CodeSuggestionsState {
     }
 
     isSuggestionsEnabled(): boolean {
-        const isEnabled = get(autoTriggerEnabledKey, this.#context)
+        const isEnabled = globals.globalState.tryGet('CODEWHISPERER_AUTO_TRIGGER_ENABLED', Boolean)
         return isEnabled !== undefined ? isEnabled : this.#fallback
+    }
+}
+
+export class CodeScansState {
+    /** The initial state if scan state was not defined */
+    #fallback: boolean
+    #onDidChangeState = new vscode.EventEmitter<boolean>()
+    /** Set a callback for when state of code scans changes */
+    onDidChangeState = this.#onDidChangeState.event
+
+    private exceedsMonthlyQuota = false
+    private latestScanTime: number | undefined = undefined
+
+    static #instance: CodeScansState
+    static get instance() {
+        return (this.#instance ??= new this())
+    }
+
+    protected constructor(fallback: boolean = true) {
+        this.#fallback = fallback
+    }
+
+    async toggleScans() {
+        const autoScansEnabled = this.isScansEnabled()
+        const toSet: boolean = !autoScansEnabled
+        await globals.globalState.update('CODEWHISPERER_AUTO_SCANS_ENABLED', toSet)
+        this.#onDidChangeState.fire(toSet)
+        return toSet
+    }
+
+    async setScansEnabled(isEnabled: boolean) {
+        if (this.isScansEnabled() !== isEnabled) {
+            await this.toggleScans()
+        }
+    }
+
+    isScansEnabled(): boolean {
+        const isEnabled = globals.globalState.tryGet('CODEWHISPERER_AUTO_SCANS_ENABLED', Boolean)
+        return isEnabled !== undefined ? isEnabled : this.#fallback
+    }
+
+    setMonthlyQuotaExceeded() {
+        this.exceedsMonthlyQuota = true
+    }
+
+    isMonthlyQuotaExceeded() {
+        return this.exceedsMonthlyQuota
+    }
+
+    setLatestScanTime(time: number) {
+        this.latestScanTime = time
+    }
+
+    getLatestScanTime() {
+        return this.latestScanTime
     }
 }
 
@@ -202,11 +255,11 @@ export class CodeScanState {
     public getIconForButton() {
         switch (this.codeScanState) {
             case CodeScanStatus.NotStarted:
-                return getIcon('vscode-debug-alt-small')
+                return getIcon('vscode-debug-all')
             case CodeScanStatus.Running:
                 return getIcon('vscode-stop-circle')
             case CodeScanStatus.Cancelling:
-                return getIcon('vscode-icons:loading~spin')
+                return getIcon('vscode-loading~spin')
         }
     }
 }
@@ -220,9 +273,10 @@ export class CodeScanStoppedError extends ToolkitError {
 }
 
 // for internal use; store status of job
-enum TransformByQStatus {
+export enum TransformByQStatus {
     NotStarted = 'Not Started',
     Running = 'Running', // includes creating job, uploading code, analyzing, testing, transforming, etc.
+    WaitingUserInput = 'WaitingForUserInput', // The human in the loop, this period is waiting for user input to continue
     Cancelled = 'Cancelled', // if user manually cancels
     Failed = 'Failed', // if job is rejected or if any other error experienced; user will receive specific error message
     Succeeded = 'Succeeded',
@@ -260,6 +314,30 @@ export class ZipManifest {
     dependenciesRoot: string | undefined = 'dependencies/'
     buildLogs: string = 'build-logs.txt'
     version: string = '1.0'
+    hilCapabilities: string[] = ['HIL_1pDependency_VersionUpgrade']
+    transformCapabilities: string[] = ['EXPLAINABILITY_V1']
+    customBuildCommand: string = 'clean test'
+}
+
+export interface IHilZipManifestParams {
+    pomGroupId: string
+    pomArtifactId: string
+    targetPomVersion: string
+    dependenciesRoot?: string
+}
+export class HilZipManifest {
+    hilCapability: string = 'HIL_1pDependency_VersionUpgrade'
+    hilInput: IHilZipManifestParams = {
+        pomGroupId: '',
+        pomArtifactId: '',
+        targetPomVersion: '',
+        dependenciesRoot: 'dependencies/',
+    }
+    constructor({ pomGroupId, pomArtifactId, targetPomVersion }: IHilZipManifestParams) {
+        this.hilInput.pomGroupId = pomGroupId
+        this.hilInput.pomArtifactId = pomArtifactId
+        this.hilInput.targetPomVersion = targetPomVersion
+    }
 }
 
 export enum DropdownStep {
@@ -267,17 +345,21 @@ export enum DropdownStep {
     STEP_2 = 2,
 }
 
-export const sessionPlanProgress: {
-    startJob: StepProgress
+export const jobPlanProgress: {
+    uploadCode: StepProgress
     buildCode: StepProgress
     generatePlan: StepProgress
     transformCode: StepProgress
 } = {
-    startJob: StepProgress.NotStarted,
+    uploadCode: StepProgress.NotStarted,
     buildCode: StepProgress.NotStarted,
     generatePlan: StepProgress.NotStarted,
     transformCode: StepProgress.NotStarted,
 }
+
+export let sessionJobHistory: {
+    [jobId: string]: { startTime: string; projectName: string; status: string; duration: string }
+} = {}
 
 export class TransformByQState {
     private transformByQState: TransformByQStatus = TransformByQStatus.NotStarted
@@ -285,14 +367,19 @@ export class TransformByQState {
     private projectName: string = ''
     private projectPath: string = ''
 
+    private startTime: string = ''
+
     private jobId: string = ''
 
     private sourceJDKVersion: JDKVersion | undefined = undefined
 
     private targetJDKVersion: JDKVersion = JDKVersion.JDK17
 
+    private customBuildCommand: string = ''
+
     private planFilePath: string = ''
     private summaryFilePath: string = ''
+    private preBuildLogFilePath: string = ''
 
     private resultArchiveFilePath: string = ''
     private projectCopyFilePath: string = ''
@@ -318,6 +405,8 @@ export class TransformByQState {
     private dependencyFolderInfo: FolderInfo | undefined = undefined
 
     private planSteps: TransformationSteps | undefined = undefined
+
+    private intervalId: NodeJS.Timeout | undefined = undefined
 
     public isNotStarted() {
         return this.transformByQState === TransformByQStatus.NotStarted
@@ -349,6 +438,18 @@ export class TransformByQState {
 
     public getProjectPath() {
         return this.projectPath
+    }
+
+    public getCustomBuildCommand() {
+        return this.customBuildCommand
+    }
+
+    public getPreBuildLogFilePath() {
+        return this.preBuildLogFilePath
+    }
+
+    public getStartTime() {
+        return this.startTime
     }
 
     public getJobId() {
@@ -427,6 +528,10 @@ export class TransformByQState {
         return this.planSteps
     }
 
+    public getIntervalId() {
+        return this.intervalId
+    }
+
     public appendToErrorLog(message: string) {
         this.errorLog += `${message}\n\n`
     }
@@ -461,6 +566,14 @@ export class TransformByQState {
 
     public setProjectPath(path: string) {
         this.projectPath = path
+    }
+
+    public setCustomBuildCommand(command: string) {
+        this.customBuildCommand = command
+    }
+
+    public setStartTime(time: string) {
+        this.startTime = time
     }
 
     public setJobId(id: string) {
@@ -527,38 +640,35 @@ export class TransformByQState {
         this.dependencyFolderInfo = folderInfo
     }
 
+    public setIntervalId(id: NodeJS.Timeout | undefined) {
+        this.intervalId = id
+    }
+
     public setPlanSteps(steps: TransformationSteps) {
         this.planSteps = steps
     }
 
-    public getPrefixTextForButton() {
-        switch (this.transformByQState) {
-            case TransformByQStatus.NotStarted:
-                return 'Run'
-            case TransformByQStatus.Cancelled:
-                return 'Stopping'
-            default:
-                return 'Stop'
-        }
+    public setPreBuildLogFilePath(path: string) {
+        this.preBuildLogFilePath = path
     }
 
-    public getIconForButton() {
-        switch (this.transformByQState) {
-            case TransformByQStatus.NotStarted:
-                return getIcon('vscode-play')
-            default:
-                return getIcon('vscode-stop-circle')
-        }
+    public resetPlanSteps() {
+        this.planSteps = undefined
+    }
+
+    public resetSessionJobHistory() {
+        sessionJobHistory = {}
     }
 
     public setJobDefaults() {
-        this.setToNotStarted() // so that the "Transform by Q" button resets
-        this.polledJobStatus = '' // reset polled job status too
+        this.setToNotStarted()
         this.jobFailureErrorNotification = undefined
         this.jobFailureErrorChatMessage = undefined
         this.jobFailureMetadata = ''
         this.payloadFilePath = ''
         this.errorLog = ''
+        this.customBuildCommand = ''
+        this.intervalId = undefined
     }
 }
 
@@ -570,7 +680,7 @@ export class TransformByQStoppedError extends ToolkitError {
     }
 }
 
-export interface CodeScanTelemetryEntry {
+export interface CodeScanTelemetryEntry extends MetricBase {
     codewhispererCodeScanJobId?: string
     codewhispererLanguage: CodewhispererLanguage
     codewhispererCodeScanProjectBytes?: number
@@ -585,9 +695,11 @@ export interface CodeScanTelemetryEntry {
     codeScanServiceInvocationsDuration: number
     result: Result
     reason?: string
+    reasonDesc?: string
     codewhispererCodeScanTotalIssues: number
     codewhispererCodeScanIssuesWithFixes: number
     credentialStartUrl: string | undefined
+    codewhispererCodeScanScope: CodewhispererCodeScanScope
 }
 
 export interface RecommendationDescription {
@@ -610,6 +722,11 @@ export interface Remediation {
     suggestedFixes: SuggestedFix[]
 }
 
+export interface CodeLine {
+    content: string
+    number: number
+}
+
 export interface RawCodeScanIssue {
     filePath: string
     startLine: number
@@ -623,6 +740,7 @@ export interface RawCodeScanIssue {
     relatedVulnerabilities: string[]
     severity: string
     remediation: Remediation
+    codeSnippet: CodeLine[]
 }
 
 export interface CodeScanIssue {
