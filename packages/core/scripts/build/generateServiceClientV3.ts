@@ -16,6 +16,7 @@ const repoRoot = path.join(process.cwd(), '../../') // root/packages/toolkit -> 
  */
 
 async function generateServiceClients(): Promise<void> {
+    console.log('Generating service client(s)...')
     const tempJsSdkPath = path.resolve(repoRoot, 'node_modules', '.zzz-awssdk3')
     console.log(`Temp JS SDK Repo location: ${tempJsSdkPath}`)
 
