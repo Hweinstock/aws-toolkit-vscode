@@ -34,18 +34,9 @@ async function generateServiceClients(): Promise<void> {
 
 async function runSetupScript(dir: string): Promise<void> {
     const setupScriptPath = path.resolve(dir, 'scripts', 'generate-clients', 'build-smithy-typescript.js')
-    const setupScript = proc.execFile('node', [setupScriptPath], { encoding: 'utf8' })
-    console.log(`Running setup script: ${setupScriptPath}`)
-
-    setupScript.stderr?.on('data', (data: any) => {
-        console.log(data)
-    })
-
-    setupScript.once('close', (code, signal) => {
-        setupScript.stdout?.removeAllListeners()
-
-        console.log('Finished running setup script')
-    })
+    console.log(`Running ${setupScriptPath}...`)
+    const setupScript = proc.execFileSync('node', [setupScriptPath], { encoding: 'utf8' })
+    console.log(`Finished running ${setupScriptPath} with result ${setupScript}`)
 }
 
 /** When cloning aws-sdk-js, we want to pull the version actually used in package-lock.json. */
@@ -53,7 +44,7 @@ async function getJsSdkVersion(): Promise<string> {
     const json = await fs.readFile(path.resolve(repoRoot, 'package.json'), 'utf-8')
     const packageJson = JSON.parse(json)
 
-    return packageJson['sdk-codegen-version']
+    return packageJson['awstoolkit']['sdk-codegen-version']
 }
 
 async function cloneJsSdk(dir: string): Promise<void> {
@@ -148,6 +139,8 @@ async function installGeneratedPackages(repoPath: string, serviceNames: string[]
     //
     // We save them as 'optional' because they're generated packages and should not
     // block the normal installation process.
+    console.log('Cleaning up old packages...')
+    console.log(`Installing ${packages.length} packages: ${packages.join(' ')}`)
     proc.execFileSync('npm', ['i', '-O', ...packages], { stdio: 'inherit' })
 
     function runNpmInPackage(location: string, args: string[]) {
@@ -177,4 +170,4 @@ void (async () => {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-const smithyModelPaths = ['src/shared/telemetry/toolkittelemetry.2017-07-25.json']
+const smithyModelPaths = ['packages/core/src/shared/telemetry/toolkittelemetry.2017-07-25.json']
