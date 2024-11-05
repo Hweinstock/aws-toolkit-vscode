@@ -522,5 +522,8 @@
         "webfont": {
             "xml2js": "0.5.0"
         }
+    },
+    "optionalDependencies": {
+        "@aws-sdk/client-toolkittelemetry": "file:node_modules/.zzz-awssdk3/codegen/sdk-codegen/build/smithyprojections/sdk-codegen/toolkittelemetry.2017-07-25/typescript-codegen"
     }
 }
