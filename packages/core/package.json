@@ -389,7 +389,7 @@
         "serveVue": "webpack serve --config-name vue --mode development",
         "watch": "npm run clean && npm run buildScripts && npm run compileOnly -- --watch",
         "lint": "ts-node ./scripts/lint/testLint.ts",
-        "generateClients": "ts-node ./scripts/build/generateServiceClient.ts ",
+        "generateClients": "ts-node ./scripts/build/generateServiceClientV3.ts ",
         "generateIcons": "ts-node ../../scripts/generateIcons.ts",
         "generateTelemetry": "node ../../node_modules/@aws-toolkits/telemetry/lib/generateTelemetry.js --extraInput=src/shared/telemetry/vscodeTelemetry.json --output=src/shared/telemetry/telemetry.gen.ts"
     },

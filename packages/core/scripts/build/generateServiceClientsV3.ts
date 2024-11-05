@@ -21,6 +21,7 @@ async function generateServiceClients(): Promise<void> {
 
     await cloneJsSdk(tempJsSdkPath)
     await replaceModels(tempJsSdkPath, smithyModelPaths)
+    await runSetupScript(tempJsSdkPath)
     await runTypingsGenerator(tempJsSdkPath)
     await installGeneratedPackages(
         tempJsSdkPath,
@@ -28,6 +29,22 @@ async function generateServiceClients(): Promise<void> {
     )
 
     console.log('Done generating service client(s)')
+}
+
+async function runSetupScript(dir: string): Promise<void> {
+    const setupScriptPath = path.resolve(dir, 'scripts', 'generate-clients', 'build-smithy-typescript.js')
+    const setupScript = proc.execFile('node', [setupScriptPath], { encoding: 'utf8' })
+    console.log(`Running setup script: ${setupScriptPath}`)
+
+    setupScript.stderr?.on('data', (data: any) => {
+        console.log(data)
+    })
+
+    setupScript.once('close', (code, signal) => {
+        setupScript.stdout?.removeAllListeners()
+
+        console.log('Finished running setup script')
+    })
 }
 
 /** When cloning aws-sdk-js, we want to pull the version actually used in package-lock.json. */
