@@ -13,11 +13,14 @@ import {
     DeserializeHandler,
     DeserializeHandlerOptions,
     DeserializeMiddleware,
+    FinalizeHandler,
+    FinalizeRequestHandlerOptions,
+    FinalizeRequestMiddleware,
     HandlerExecutionContext,
     Provider,
     UserAgent,
 } from '@aws-sdk/types'
-import { HttpResponse } from '@aws-sdk/protocol-http'
+import { HttpRequest, HttpResponse } from '@aws-sdk/protocol-http'
 import { telemetry } from './telemetry'
 import { getRequestId } from './errors'
 import { extensionVersion } from '.'
@@ -85,6 +88,7 @@ export class DefaultAWSClientBuilderV3 implements AWSClientBuilderV3 {
         const service = new type(opt)
         // TODO: add middleware for logging, telemetry, endpoints.
         service.middlewareStack.add(telemetryMiddleware, { step: 'deserialize' } as DeserializeHandlerOptions)
+        service.middlewareStack.add(loggingMiddleware, { step: 'finalizeRequest' } as FinalizeRequestHandlerOptions)
         return service
     }
 }
@@ -132,10 +136,21 @@ const telemetryMiddleware: DeserializeMiddleware<any, any> =
         const logTail = `(${hostname} ${path})`
         const result = await next(args).catch((e: any) => logAndThrow(e, serviceId, logTail))
         if (HttpResponse.isInstance(result.response)) {
-            // TODO: omit credentials / sensitive info from the logs / telemetry.
+            // TODO: omit credentials / sensitive info from the telemetry.
             const output = omitIfPresent(result.output, [])
             getLogger().debug('API Response %s: %O', logTail, output)
         }
 
         return result
+    }
+
+const loggingMiddleware: FinalizeRequestMiddleware<any, any> =
+    (next: FinalizeHandler<any, any>) => async (args: any) => {
+        if (HttpRequest.isInstance(args.request)) {
+            const { hostname, path } = args.request
+            // TODO: omit credentials / sensitive info from the logs.
+            const input = omitIfPresent(args.input, [])
+            getLogger().debug('API Request (%s %s): %O', hostname, path, input)
+        }
+        return next(args)
     }
