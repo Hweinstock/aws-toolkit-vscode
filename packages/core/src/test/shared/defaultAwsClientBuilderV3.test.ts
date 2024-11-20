@@ -2,9 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-
+import sinon from 'sinon'
 import assert from 'assert'
-import * as sinon from 'sinon'
 import { version } from 'vscode'
 import { getClientId } from '../../shared/telemetry/util'
 import { FakeMemento } from '../fakeExtensionContext'
@@ -14,12 +13,15 @@ import {
     AWSClientBuilderV3,
     DefaultAWSClientBuilderV3,
     getServiceId,
+    logOnRequest,
     recordErrorTelemetry,
 } from '../../shared/awsClientBuilderV3'
 import { Client } from '@aws-sdk/smithy-client'
 import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
+import { HttpRequest } from '@aws-sdk/protocol-http'
+import { assertLogsContain } from '../globalSetup.test'
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
@@ -60,6 +62,29 @@ describe('DefaultAwsClientBuilderV3', function () {
         })
 
         assert.strictEqual(service.config.customUserAgent[0][0], 'CUSTOM USER AGENT')
+    })
+
+    describe('middlewareStack', function () {
+        afterEach(function () {
+            sinon.restore()
+        })
+
+        it('logs messages on request and response', async function () {
+            sinon.stub(HttpRequest, 'isInstance').callsFake(() => true)
+            const args = {
+                request: {
+                    hostname: 'testHost',
+                    path: 'testPath',
+                },
+                input: {
+                    testKey: 'testValue',
+                },
+            }
+            await logOnRequest((_: any) => _, args as any)
+            // Avoid making test dependent on logging format.
+            const expectedStrs = ['testHost', 'testPath', 'testKey', 'testValue']
+            expectedStrs.forEach((t) => assertLogsContain(t, false, 'debug'))
+        })
     })
 })
 

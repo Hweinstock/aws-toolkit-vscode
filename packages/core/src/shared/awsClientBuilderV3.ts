@@ -10,11 +10,11 @@ import { Client as IClient } from '@smithy/types'
 import { getUserAgent } from './telemetry/util'
 import { DevSettings } from './settings'
 import {
+    BuildHandler,
+    BuildMiddleware,
     DeserializeHandler,
-    DeserializeHandlerOptions,
     DeserializeMiddleware,
     FinalizeHandler,
-    FinalizeRequestHandlerOptions,
     FinalizeRequestMiddleware,
     HandlerExecutionContext,
     Provider,
@@ -25,7 +25,8 @@ import { telemetry } from './telemetry'
 import { getRequestId } from './errors'
 import { extensionVersion } from '.'
 import { getLogger } from './logger'
-import { omitIfPresent } from './utilities/tsUtils'
+import { omitIfPresent, selectFrom } from './utilities/tsUtils'
+import { inspect } from './utilities/collectionUtils'
 
 export type AwsClient = IClient<any, any, any>
 interface AwsConfigOptions {
@@ -87,8 +88,9 @@ export class DefaultAWSClientBuilderV3 implements AWSClientBuilderV3 {
 
         const service = new type(opt)
         // TODO: add middleware for logging, telemetry, endpoints.
-        service.middlewareStack.add(telemetryMiddleware, { step: 'deserialize' } as DeserializeHandlerOptions)
-        service.middlewareStack.add(loggingMiddleware, { step: 'finalizeRequest' } as FinalizeRequestHandlerOptions)
+        service.middlewareStack.add(telemetryMiddleware, { step: 'deserialize' })
+        service.middlewareStack.add(loggingMiddleware, { step: 'finalizeRequest' })
+        service.middlewareStack.add(getEndpointMiddleware(settings), { step: 'build' })
         return service
     }
 }
@@ -126,31 +128,51 @@ function logAndThrow(e: any, serviceId: string, errorMessageAppend: string): nev
  * Telemetry logic to be added to all created clients. Adds logging and emitting metric on errors.
  */
 
-export const telemetryMiddleware: DeserializeMiddleware<any, any> =
-    (next: DeserializeHandler<any, any>, context: HandlerExecutionContext) => async (args: any) => {
-        if (!HttpResponse.isInstance(args.request)) {
-            return next(args)
-        }
-        const serviceId = getServiceId(context as object)
-        const { hostname, path } = args.request
-        const logTail = `(${hostname} ${path})`
-        const result = await next(args).catch((e: any) => logAndThrow(e, serviceId, logTail))
-        if (HttpResponse.isInstance(result.response)) {
-            // TODO: omit credentials / sensitive info from the telemetry.
-            const output = omitIfPresent(result.output, [])
-            getLogger().debug('API Response %s: %O', logTail, output)
-        }
+const telemetryMiddleware: DeserializeMiddleware<any, any> =
+    (next: DeserializeHandler<any, any>, context: HandlerExecutionContext) => async (args: any) =>
+        emitOnRequest(next, context, args)
 
-        return result
-    }
+const loggingMiddleware: FinalizeRequestMiddleware<any, any> = (next: FinalizeHandler<any, any>) => async (args: any) =>
+    logOnRequest(next, args)
 
-export const loggingMiddleware: FinalizeRequestMiddleware<any, any> =
-    (next: FinalizeHandler<any, any>) => async (args: any) => {
-        if (HttpRequest.isInstance(args.request)) {
-            const { hostname, path } = args.request
-            // TODO: omit credentials / sensitive info from the logs.
-            const input = omitIfPresent(args.input, [])
-            getLogger().debug('API Request (%s %s): %O', hostname, path, input)
-        }
+export async function emitOnRequest(next: DeserializeHandler<any, any>, context: HandlerExecutionContext, args: any) {
+    if (!HttpResponse.isInstance(args.request)) {
         return next(args)
     }
+    const serviceId = getServiceId(context as object)
+    const { hostname, path } = args.request
+    const logTail = `(${hostname} ${path})`
+    const result = await next(args).catch((e: any) => logAndThrow(e, serviceId, logTail))
+    if (HttpResponse.isInstance(result.response)) {
+        // TODO: omit credentials / sensitive info from the telemetry.
+        const output = omitIfPresent(result.output, [])
+        getLogger().debug('API Response %s: %O', logTail, output)
+    }
+
+    return result
+}
+
+export async function logOnRequest(next: FinalizeHandler<any, any>, args: any) {
+    if (HttpRequest.isInstance(args.request)) {
+        const { hostname, path } = args.request
+        // TODO: omit credentials / sensitive info from the logs.
+        const input = omitIfPresent(args.input, [])
+        getLogger().debug(`API Request (%s %s): ${inspect(input, { depth: 5 })}`, hostname, path)
+    }
+    return next(args)
+}
+
+function getEndpointMiddleware(settings: DevSettings = DevSettings.instance): BuildMiddleware<any, any> {
+    return (next: BuildHandler<any, any>, context: HandlerExecutionContext) => async (args: any) => {
+        if (HttpRequest.isInstance(args.request)) {
+            const serviceId = getServiceId(context as object)
+            const endpoint = serviceId ? settings.get('endpoints', {})[serviceId] : undefined
+            if (endpoint) {
+                const url = new URL(endpoint)
+                Object.assign(args.request, selectFrom(url, 'hostname', 'port', 'protocol'))
+            }
+        }
+
+        return next(args)
+    }
+}
