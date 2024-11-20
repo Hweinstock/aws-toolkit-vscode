@@ -126,8 +126,9 @@ function logAndThrow(e: any, serviceId: string, errorMessageAppend: string): nev
  * Telemetry logic to be added to all created clients. Adds logging and emitting metric on errors.
  */
 
-const telemetryMiddleware: DeserializeMiddleware<any, any> =
+export const telemetryMiddleware: DeserializeMiddleware<any, any> =
     (next: DeserializeHandler<any, any>, context: HandlerExecutionContext) => async (args: any) => {
+        console.log('in telemetry middleware')
         if (!HttpResponse.isInstance(args.request)) {
             return next(args)
         }
@@ -144,8 +145,9 @@ const telemetryMiddleware: DeserializeMiddleware<any, any> =
         return result
     }
 
-const loggingMiddleware: FinalizeRequestMiddleware<any, any> =
+export const loggingMiddleware: FinalizeRequestMiddleware<any, any> =
     (next: FinalizeHandler<any, any>) => async (args: any) => {
+        console.log('inside loggingMiddleware')
         if (HttpRequest.isInstance(args.request)) {
             const { hostname, path } = args.request
             // TODO: omit credentials / sensitive info from the logs.

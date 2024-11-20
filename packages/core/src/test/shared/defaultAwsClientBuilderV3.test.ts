@@ -13,14 +13,16 @@ import {
     AWSClientBuilderV3,
     DefaultAWSClientBuilderV3,
     getServiceId,
+    loggingMiddleware,
     recordErrorTelemetry,
 } from '../../shared/awsClientBuilderV3'
 import { Client } from '@aws-sdk/smithy-client'
 import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
-// import { EC2Client } from '@aws-sdk/client-ec2'
-// import { mockClient } from 'aws-sdk-client-mock'
+import { DescribeInstancesCommand, EC2Client } from '@aws-sdk/client-ec2'
+import { mockClient } from 'aws-sdk-client-mock'
+import { assertLogsContain, getTestLogger } from '../globalSetup.test'
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
@@ -64,8 +66,12 @@ describe('DefaultAwsClientBuilderV3', function () {
     })
 
     it('logs each API request', async function () {
-        //const ec2MockClient = mockClient(EC2Client)
-        //const service = await builder.createAwsService(ec2MockClient)
+        //mockClient(EC2Client)
+        // mockEc2.on(DescribeInstancesCommand).resolves({})
+        const service = await builder.createAwsService(EC2Client)
+        await service.send(new DescribeInstancesCommand())
+        const logs = getTestLogger().getLoggedEntries('debug')
+        assertLogsContain('API request: ec2:DescribeInstancesCommand', true, 'debug')
     })
 })
 
