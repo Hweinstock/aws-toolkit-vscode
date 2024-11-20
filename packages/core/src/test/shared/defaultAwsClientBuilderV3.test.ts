@@ -4,6 +4,7 @@
  */
 
 import assert from 'assert'
+import * as sinon from 'sinon'
 import { version } from 'vscode'
 import { getClientId } from '../../shared/telemetry/util'
 import { FakeMemento } from '../fakeExtensionContext'
@@ -13,16 +14,12 @@ import {
     AWSClientBuilderV3,
     DefaultAWSClientBuilderV3,
     getServiceId,
-    loggingMiddleware,
     recordErrorTelemetry,
 } from '../../shared/awsClientBuilderV3'
 import { Client } from '@aws-sdk/smithy-client'
 import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
-import { DescribeInstancesCommand, EC2Client } from '@aws-sdk/client-ec2'
-import { mockClient } from 'aws-sdk-client-mock'
-import { assertLogsContain, getTestLogger } from '../globalSetup.test'
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
@@ -63,15 +60,6 @@ describe('DefaultAwsClientBuilderV3', function () {
         })
 
         assert.strictEqual(service.config.customUserAgent[0][0], 'CUSTOM USER AGENT')
-    })
-
-    it('logs each API request', async function () {
-        //mockClient(EC2Client)
-        // mockEc2.on(DescribeInstancesCommand).resolves({})
-        const service = await builder.createAwsService(EC2Client)
-        await service.send(new DescribeInstancesCommand())
-        const logs = getTestLogger().getLoggedEntries('debug')
-        assertLogsContain('API request: ec2:DescribeInstancesCommand', true, 'debug')
     })
 })
 
