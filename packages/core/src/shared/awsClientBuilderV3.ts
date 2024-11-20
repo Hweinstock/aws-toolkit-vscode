@@ -26,7 +26,6 @@ import { getRequestId } from './errors'
 import { extensionVersion } from '.'
 import { getLogger } from './logger'
 import { omitIfPresent, selectFrom } from './utilities/tsUtils'
-import { inspect } from './utilities/collectionUtils'
 
 export type AwsClient = IClient<any, any, any>
 interface AwsConfigOptions {
@@ -109,8 +108,10 @@ export function recordErrorTelemetry(err: Error, serviceName?: string) {
         requestServiceType?: string
     }
 
+    const requestId = getRequestId(err)
+
     telemetry.record({
-        requestId: getRequestId(err),
+        requestId: requestId,
         requestServiceType: serviceName,
     } satisfies RequestData as any)
 }
@@ -118,9 +119,7 @@ export function recordErrorTelemetry(err: Error, serviceName?: string) {
 function logAndThrow(e: any, serviceId: string, errorMessageAppend: string): never {
     if (e instanceof Error) {
         recordErrorTelemetry(e, serviceId)
-        const err = { ...e }
-        delete err['stack']
-        getLogger().error('API Response %s: %O', errorMessageAppend, err)
+        getLogger().error('API Response %s: %O', errorMessageAppend, e)
     }
     throw e
 }
@@ -142,14 +141,17 @@ export async function emitOnRequest(next: DeserializeHandler<any, any>, context:
     const serviceId = getServiceId(context as object)
     const { hostname, path } = args.request
     const logTail = `(${hostname} ${path})`
-    const result = await next(args).catch((e: any) => logAndThrow(e, serviceId, logTail))
-    if (HttpResponse.isInstance(result.response)) {
-        // TODO: omit credentials / sensitive info from the telemetry.
-        const output = omitIfPresent(result.output, [])
-        getLogger().debug('API Response %s: %O', logTail, output)
+    try {
+        const result = await next(args)
+        if (HttpResponse.isInstance(result.response)) {
+            // TODO: omit credentials / sensitive info from the telemetry.
+            const output = omitIfPresent(result.output, [])
+            getLogger().debug(`API Response %s: %O`, logTail, output)
+        }
+        return result
+    } catch (e: any) {
+        logAndThrow(e, serviceId, logTail)
     }
-
-    return result
 }
 
 export async function logOnRequest(next: FinalizeHandler<any, any>, args: any) {
@@ -157,7 +159,7 @@ export async function logOnRequest(next: FinalizeHandler<any, any>, args: any) {
         const { hostname, path } = args.request
         // TODO: omit credentials / sensitive info from the logs.
         const input = omitIfPresent(args.input, [])
-        getLogger().debug(`API Request (%s %s): ${inspect(input, { depth: 5 })}`, hostname, path)
+        getLogger().debug(`API Request (%s %s): %O`, hostname, path, input)
     }
     return next(args)
 }

@@ -178,7 +178,7 @@ export function assertLogsContain(text: string, exactMatch: boolean, severity: L
                     : e.message.includes(text)
                 : exactMatch
                   ? e === text
-                  : e.includes(text)
+                  : typeof e === 'string' && e.includes(text)
         ),
         `Expected to find "${text}" in the logs as type "${severity}"`
     )

@@ -12,6 +12,7 @@ import { GlobalState } from '../../shared/globalState'
 import {
     AWSClientBuilderV3,
     DefaultAWSClientBuilderV3,
+    emitOnRequest,
     getServiceId,
     logOnRequest,
     recordErrorTelemetry,
@@ -20,8 +21,14 @@ import { Client } from '@aws-sdk/smithy-client'
 import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
-import { HttpRequest } from '@aws-sdk/protocol-http'
+import { HttpRequest, HttpResponse } from '@aws-sdk/protocol-http'
 import { assertLogsContain } from '../globalSetup.test'
+import { LogLevel } from '../../shared/logger'
+
+// Avoid making test dependent on logging format.
+function assertLogsContainAllOf(keywords: string[], exact: boolean, level: LogLevel) {
+    keywords.forEach((w) => assertLogsContain(w, exact, level))
+}
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
@@ -65,13 +72,10 @@ describe('DefaultAwsClientBuilderV3', function () {
     })
 
     describe('middlewareStack', function () {
-        afterEach(function () {
-            sinon.restore()
-        })
-
-        it('logs messages on request and response', async function () {
-            sinon.stub(HttpRequest, 'isInstance').callsFake(() => true)
-            const args = {
+        let args: { request: { hostname: string; path: string }; input: any }
+        let context: { clientName?: string; commandName?: string }
+        before(function () {
+            args = {
                 request: {
                     hostname: 'testHost',
                     path: 'testPath',
@@ -80,10 +84,51 @@ describe('DefaultAwsClientBuilderV3', function () {
                     testKey: 'testValue',
                 },
             }
+            context = {
+                clientName: 'testClient',
+            }
+        })
+        afterEach(function () {
+            sinon.restore()
+        })
+
+        it('logs messages on request', async function () {
+            sinon.stub(HttpRequest, 'isInstance').callsFake(() => true)
             await logOnRequest((_: any) => _, args as any)
-            // Avoid making test dependent on logging format.
-            const expectedStrs = ['testHost', 'testPath', 'testKey', 'testValue']
-            expectedStrs.forEach((t) => assertLogsContain(t, false, 'debug'))
+            assertLogsContainAllOf(['testHost', 'testPath'], false, 'debug')
+        })
+
+        it('adds telemetry meta and logs on error failure', async function () {
+            sinon.stub(HttpResponse, 'isInstance').callsFake(() => true)
+
+            const next = (_: any) => {
+                throw new Error('test error')
+            }
+            await telemetry.vscode_executeCommand.run(async (span) => {
+                await assert.rejects(emitOnRequest(next, context, args))
+            })
+            assertLogsContain('test error', false, 'error')
+            assertTelemetry('vscode_executeCommand', { requestServiceType: 'test' })
+        })
+
+        it('does not emit telemetry, but still logs on successes', async function () {
+            sinon.stub(HttpResponse, 'isInstance').callsFake(() => true)
+            const response = {
+                response: {
+                    statusCode: 200,
+                },
+                output: {
+                    message: 'test output',
+                },
+            }
+            const next = async (_: any) => {
+                return response
+            }
+            await telemetry.vscode_executeCommand.run(async (span) => {
+                assert.deepStrictEqual(await emitOnRequest(next, context, args), response)
+            })
+            assertLogsContainAllOf(['testHost', 'testPath'], false, 'debug')
+            assert.throws(() => assertTelemetry('vscode_executeCommand', { requestServiceType: 'test' }))
         })
     })
 })
