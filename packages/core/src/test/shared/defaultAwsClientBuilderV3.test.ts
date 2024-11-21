@@ -22,13 +22,7 @@ import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
 import { HttpRequest, HttpResponse } from '@aws-sdk/protocol-http'
-import { assertLogsContain } from '../globalSetup.test'
-import { LogLevel } from '../../shared/logger'
-
-// Avoid making test dependent on logging format.
-function assertLogsContainAllOf(keywords: string[], exact: boolean, level: LogLevel) {
-    keywords.forEach((w) => assertLogsContain(w, exact, level))
-}
+import { assertLogsContain, assertLogsContainAllOf } from '../globalSetup.test'
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
