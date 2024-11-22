@@ -15,14 +15,16 @@ import {
     emitOnRequest,
     getServiceId,
     logOnRequest,
+    overwriteEndpoint,
     recordErrorTelemetry,
 } from '../../shared/awsClientBuilderV3'
 import { Client } from '@aws-sdk/smithy-client'
-import { extensionVersion } from '../../shared'
+import { DevSettings, extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
 import { telemetry } from '../../shared/telemetry'
 import { HttpRequest, HttpResponse } from '@aws-sdk/protocol-http'
 import { assertLogsContain, assertLogsContainAllOf } from '../globalSetup.test'
+import { TestSettings } from '../utilities/testSettingsConfiguration'
 
 describe('DefaultAwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
@@ -68,6 +70,7 @@ describe('DefaultAwsClientBuilderV3', function () {
     describe('middlewareStack', function () {
         let args: { request: { hostname: string; path: string }; input: any }
         let context: { clientName?: string; commandName?: string }
+        let response: { response: { statusCode: number }; output: { message: string } }
         before(function () {
             args = {
                 request: {
@@ -79,7 +82,15 @@ describe('DefaultAwsClientBuilderV3', function () {
                 },
             }
             context = {
-                clientName: 'testClient',
+                clientName: 'fooClient',
+            }
+            response = {
+                response: {
+                    statusCode: 200,
+                },
+                output: {
+                    message: 'test output',
+                },
             }
         })
         afterEach(function () {
@@ -102,19 +113,11 @@ describe('DefaultAwsClientBuilderV3', function () {
                 await assert.rejects(emitOnRequest(next, context, args))
             })
             assertLogsContain('test error', false, 'error')
-            assertTelemetry('vscode_executeCommand', { requestServiceType: 'test' })
+            assertTelemetry('vscode_executeCommand', { requestServiceType: 'foo' })
         })
 
         it('does not emit telemetry, but still logs on successes', async function () {
             sinon.stub(HttpResponse, 'isInstance').callsFake(() => true)
-            const response = {
-                response: {
-                    statusCode: 200,
-                },
-                output: {
-                    message: 'test output',
-                },
-            }
             const next = async (_: any) => {
                 return response
             }
@@ -123,6 +126,19 @@ describe('DefaultAwsClientBuilderV3', function () {
             })
             assertLogsContainAllOf(['testHost', 'testPath'], false, 'debug')
             assert.throws(() => assertTelemetry('vscode_executeCommand', { requestServiceType: 'test' }))
+        })
+
+        it('custom endpoints overwrite request url', async function () {
+            const settings = new TestSettings()
+            await settings.update('aws.dev.endpoints', { foo: 'http://example.com:3000/path' })
+            sinon.stub(HttpRequest, 'isInstance').callsFake(() => true)
+            const next = async (args: any) => args
+            const newArgs: any = await overwriteEndpoint(next, context, new DevSettings(settings), args)
+
+            assert.strictEqual(newArgs.request.hostname, 'example.com')
+            assert.strictEqual(newArgs.request.protocol, 'http:')
+            assert.strictEqual(newArgs.request.port, '3000')
+            assert.strictEqual(newArgs.request.pathname, '/path')
         })
     })
 })
