@@ -71,7 +71,8 @@ describe('DefaultAwsClientBuilderV3', function () {
         let args: { request: { hostname: string; path: string }; input: any }
         let context: { clientName?: string; commandName?: string }
         let response: { response: { statusCode: number }; output: { message: string } }
-        before(function () {
+
+        beforeEach(function () {
             args = {
                 request: {
                     hostname: 'testHost',
@@ -139,6 +140,16 @@ describe('DefaultAwsClientBuilderV3', function () {
             assert.strictEqual(newArgs.request.protocol, 'http:')
             assert.strictEqual(newArgs.request.port, '3000')
             assert.strictEqual(newArgs.request.pathname, '/path')
+        })
+
+        it('custom endpoints are not overwritten if not specified', async function () {
+            const settings = new TestSettings()
+            sinon.stub(HttpRequest, 'isInstance').callsFake(() => true)
+            const next = async (args: any) => args
+            const newArgs: any = await overwriteEndpoint(next, context, new DevSettings(settings), args)
+
+            assert.strictEqual(newArgs.request.hostname, 'testHost')
+            assert.strictEqual(newArgs.request.path, 'testPath')
         })
     })
 })

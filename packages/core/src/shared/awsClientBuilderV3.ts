@@ -177,6 +177,7 @@ export function overwriteEndpoint(
         if (endpoint) {
             const url = new URL(endpoint)
             Object.assign(args.request, selectFrom(url, 'hostname', 'port', 'protocol', 'pathname'))
+            args.request.path = args.request.pathname
         }
     }
     return next(args)
