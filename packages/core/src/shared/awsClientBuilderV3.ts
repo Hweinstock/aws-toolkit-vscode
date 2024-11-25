@@ -73,7 +73,6 @@ export class DefaultAWSClientBuilderV3 implements AWSClientBuilderV3 {
         if (!opt.customUserAgent && userAgent) {
             opt.customUserAgent = [[getUserAgent({ includePlatform: true, includeClientId: true }), extensionVersion]]
         }
-        // TODO: add tests for refresh logic.
         opt.credentials = async () => {
             const creds = await shim.get()
             if (creds.expiration && creds.expiration.getTime() < Date.now()) {
