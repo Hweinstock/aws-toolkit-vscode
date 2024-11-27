@@ -27,6 +27,7 @@ import { getLogger } from './logger'
 import { omitIfPresent } from './utilities/tsUtils'
 
 export type AwsClient = IClient<any, any, any>
+export type AwsClientConstructor<C> = new (o: AwsClientOptions) => C
 interface AwsConfigOptions {
     credentials: AwsCredentialIdentityProvider
     region: string | Provider<string>
@@ -40,7 +41,7 @@ export type AwsClientOptions = AwsConfigOptions
 
 export interface AWSClientBuilderV3 {
     createAwsService<C extends AwsClient>(
-        type: new (o: AwsClientOptions) => C,
+        type: AwsClientConstructor<C>,
         options?: Partial<AwsClientOptions>,
         region?: string,
         userAgent?: boolean,
@@ -60,7 +61,7 @@ export class DefaultAWSClientBuilderV3 implements AWSClientBuilderV3 {
     }
 
     public async createAwsService<C extends AwsClient>(
-        type: new (o: AwsClientOptions) => C,
+        type: AwsClientConstructor<C>,
         options?: Partial<AwsClientOptions>,
         region?: string,
         userAgent: boolean = true,
