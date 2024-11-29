@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as vscode from 'vscode'
-import { globals } from '..'
+import globals from '../extensionGlobals'
 import { AwsClient, AwsClientConstructor } from '../awsClientBuilderV3'
 
-export abstract class SDKWrapper<T extends AwsClient> implements vscode.Disposable {
+export abstract class ClientWrapper<T extends AwsClient> implements vscode.Disposable {
     protected client: T | undefined
 
-    private constructor(
+    public constructor(
         public readonly regionCode: string,
         private readonly clientType: AwsClientConstructor<T>
     ) {}
