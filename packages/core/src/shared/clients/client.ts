@@ -6,20 +6,20 @@ import * as vscode from 'vscode'
 import globals from '../extensionGlobals'
 import { AwsClient, AwsClientConstructor } from '../awsClientBuilderV3'
 
-export abstract class ClientWrapper<T extends AwsClient> implements vscode.Disposable {
-    protected client: T | undefined
+export abstract class ClientWrapper implements vscode.Disposable {
+    protected client: AwsClient | undefined
 
     public constructor(
         public readonly regionCode: string,
-        private readonly clientType: AwsClientConstructor<T>
+        private readonly clientType: AwsClientConstructor<any>
     ) {}
 
-    protected async getClient(): Promise<T> {
+    protected async getClient() {
         if (this.client) {
             return this.client
         }
         this.client = await globals.sdkClientBuilderV3.createAwsService(this.clientType, undefined, this.regionCode)
-        return this.client
+        return this.client!
     }
 
     public dispose() {

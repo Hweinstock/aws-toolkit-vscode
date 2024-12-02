@@ -14,6 +14,7 @@ import {
     DeserializeHandlerOptions,
     DeserializeMiddleware,
     HandlerExecutionContext,
+    MetadataBearer,
     Provider,
     RetryStrategy,
     UserAgent,
@@ -26,7 +27,7 @@ import { extensionVersion } from '.'
 import { getLogger } from './logger'
 import { omitIfPresent } from './utilities/tsUtils'
 
-export type AwsClient = IClient<any, any, any>
+export type AwsClient = IClient<object, MetadataBearer, any>
 export type AwsClientConstructor<C> = new (o: AwsClientOptions) => C
 interface AwsConfigOptions {
     credentials: AwsCredentialIdentityProvider
