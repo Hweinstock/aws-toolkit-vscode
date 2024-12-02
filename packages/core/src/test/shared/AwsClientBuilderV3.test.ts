@@ -9,12 +9,7 @@ import { getClientId } from '../../shared/telemetry/util'
 import { FakeMemento } from '../fakeExtensionContext'
 import { FakeAwsContext } from '../utilities/fakeAwsContext'
 import { GlobalState } from '../../shared/globalState'
-import {
-    AWSClientBuilderV3,
-    DefaultAWSClientBuilderV3,
-    getServiceId,
-    recordErrorTelemetry,
-} from '../../shared/awsClientBuilderV3'
+import { AWSClientBuilderV3, getServiceId, recordErrorTelemetry } from '../../shared/awsClientBuilderV3'
 import { Client } from '@aws-sdk/smithy-client'
 import { extensionVersion } from '../../shared'
 import { assertTelemetry } from '../testUtil'
@@ -48,7 +43,7 @@ class MockCredentialsShim implements CredentialsShim {
     }
 }
 
-describe('DefaultAwsClientBuilderV3', function () {
+describe('AwsClientBuilderV3', function () {
     let builder: AWSClientBuilderV3
     let fakeContext: FakeAwsContext
     let mockCredsShim: MockCredentialsShim
@@ -71,12 +66,12 @@ describe('DefaultAwsClientBuilderV3', function () {
         }
         mockCredsShim = new MockCredentialsShim(oldCreds, newCreds)
         fakeContext.credentialsShim = mockCredsShim
-        builder = new DefaultAWSClientBuilderV3(fakeContext)
+        builder = new AWSClientBuilderV3(fakeContext)
     })
 
     describe('createAndConfigureSdkClient', function () {
         it('includes Toolkit user-agent if no options are specified', async function () {
-            const service = await builder.createAwsService(Client as any)
+            const service = await builder.createAwsService(Client)
             const clientId = getClientId(new GlobalState(new FakeMemento()))
 
             assert.ok(service.config.customUserAgent)
@@ -88,21 +83,21 @@ describe('DefaultAwsClientBuilderV3', function () {
         })
 
         it('adds region to client', async function () {
-            const service = await builder.createAwsService(Client as any, { region: 'us-west-2' })
+            const service = await builder.createAwsService(Client, { region: 'us-west-2' })
 
             assert.ok(service.config.region)
             assert.strictEqual(service.config.region, 'us-west-2')
         })
 
         it('adds Client-Id to user agent', async function () {
-            const service = await builder.createAwsService(Client as any)
+            const service = await builder.createAwsService(Client)
             const clientId = getClientId(new GlobalState(new FakeMemento()))
             const regex = new RegExp(`ClientId/${clientId}`)
             assert.ok(service.config.customUserAgent![0][0].match(regex))
         })
 
         it('does not override custom user-agent if specified in options', async function () {
-            const service = await builder.createAwsService(Client as any, {
+            const service = await builder.createAwsService(Client, {
                 customUserAgent: [['CUSTOM USER AGENT']],
             })
 
@@ -110,14 +105,14 @@ describe('DefaultAwsClientBuilderV3', function () {
         })
 
         it('refreshes credentials when they expire', async function () {
-            const service = await builder.createAwsService(Client as any)
+            const service = await builder.createAwsService(Client)
             assert.strictEqual(await service.config.credentials(), oldCreds)
             mockCredsShim.expire()
             assert.strictEqual(await service.config.credentials(), newCreds)
         })
 
         it('does not cache stale credentials', async function () {
-            const service = await builder.createAwsService(Client as any)
+            const service = await builder.createAwsService(Client)
             assert.strictEqual(await service.config.credentials(), oldCreds)
             const newerCreds = {
                 accessKeyId: 'old2',
