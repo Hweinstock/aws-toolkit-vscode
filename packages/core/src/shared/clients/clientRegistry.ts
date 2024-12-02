@@ -4,13 +4,14 @@
  */
 import * as vscode from 'vscode'
 import { ClientWrapper } from './client'
+import { AwsClient } from '../awsClientBuilderV3'
 
 interface ClientKey {
     name: string
     region: string
 }
 
-export class AWSClientRegistry extends Map<ClientKey, ClientWrapper<any>> implements vscode.Disposable {
+export class AWSClientRegistry extends Map<ClientKey, ClientWrapper<AwsClient>> implements vscode.Disposable {
     public dispose(): void {
         this.forEach((client) => client.dispose())
         this.clear()

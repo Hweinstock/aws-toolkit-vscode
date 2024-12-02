@@ -6,8 +6,8 @@ import * as vscode from 'vscode'
 import globals from '../extensionGlobals'
 import { AwsClient, AwsClientConstructor } from '../awsClientBuilderV3'
 
-export abstract class ClientWrapper implements vscode.Disposable {
-    protected client: AwsClient | undefined
+export abstract class ClientWrapper<C extends AwsClient> implements vscode.Disposable {
+    protected client: C | undefined
 
     public constructor(
         public readonly regionCode: string,

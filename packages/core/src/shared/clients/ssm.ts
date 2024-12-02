@@ -8,8 +8,9 @@ import { pageableToCollection } from '../utilities/collectionUtils'
 import { PromiseResult } from 'aws-sdk/lib/request'
 import { ToolkitError } from '../errors'
 import { ClientWrapper } from './client'
+import { globals } from '..'
 
-export class SSMWrapper extends ClientWrapper {
+export class SSMWrapper extends ClientWrapper<SSM> {
     public constructor(public override readonly regionCode: string) {
         super(regionCode, SSMClient)
     }
@@ -23,7 +24,7 @@ export class SSMWrapper extends ClientWrapper {
     public async terminateSessionFromId(sessionId: string): Promise<TerminateSessionResponse> {
         const client = await this.getClient()
         const command = new TerminateSessionCommand({ SessionId: sessionId })
-        const termination = await client.send(command as any)
+        const termination = await client.send(command)
         return termination!
     }
 
