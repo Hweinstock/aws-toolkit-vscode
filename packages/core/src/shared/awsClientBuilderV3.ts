@@ -6,7 +6,6 @@
 import { CredentialsShim } from '../auth/deprecated/loginManager'
 import { AwsContext } from './awsContext'
 import { AwsCredentialIdentityProvider, RetryStrategyV2 } from '@smithy/types'
-import { Client as IClient } from '@smithy/types'
 import { getUserAgent } from './telemetry/util'
 import { DevSettings } from './settings'
 import {
@@ -14,7 +13,6 @@ import {
     DeserializeHandlerOptions,
     DeserializeMiddleware,
     HandlerExecutionContext,
-    MetadataBearer,
     Provider,
     RetryStrategy,
     UserAgent,
@@ -27,8 +25,12 @@ import { extensionVersion } from '.'
 import { getLogger } from './logger'
 import { omitIfPresent } from './utilities/tsUtils'
 
-export type AwsClient = IClient<object, MetadataBearer, any>
 export type AwsClientConstructor<C> = new (o: AwsClientOptions) => C
+
+interface AwsClient {
+    middlewareStack: any // Ideally this would extends MiddlewareStack<Input, Output>, but this causes issues on client construction.
+}
+
 interface AwsConfigOptions {
     credentials: AwsCredentialIdentityProvider
     region: string | Provider<string>
@@ -40,17 +42,7 @@ interface AwsConfigOptions {
 }
 export type AwsClientOptions = AwsConfigOptions
 
-export interface AWSClientBuilderV3 {
-    createAwsService<C extends AwsClient>(
-        type: AwsClientConstructor<C>,
-        options?: Partial<AwsClientOptions>,
-        region?: string,
-        userAgent?: boolean,
-        settings?: DevSettings
-    ): Promise<C>
-}
-
-export class DefaultAWSClientBuilderV3 implements AWSClientBuilderV3 {
+export class AWSClientBuilderV3 {
     public constructor(private readonly context: AwsContext) {}
 
     private getShim(): CredentialsShim {
