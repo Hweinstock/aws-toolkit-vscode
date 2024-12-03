@@ -3,12 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SSM, SSMClient, Session, TerminateSessionCommand, TerminateSessionResponse } from '@aws-sdk/client-ssm'
+import {
+    SSM,
+    SSMClient,
+    Session,
+    StartSessionCommand,
+    TerminateSessionCommand,
+    TerminateSessionResponse,
+    StartSessionCommandOutput,
+    DescribeInstanceInformationCommand,
+    DescribeInstanceInformationCommandInput,
+    InstanceInformation,
+    SendCommandCommand,
+    SendCommandCommandOutput,
+    waitForCommandExecuted,
+    waitUntilCommandExecuted,
+    SessionState,
+    DescribeSessionsCommand,
+    DescribeSessionsCommandInput,
+} from '@aws-sdk/client-ssm'
 import { pageableToCollection } from '../utilities/collectionUtils'
-import { PromiseResult } from 'aws-sdk/lib/request'
 import { ToolkitError } from '../errors'
 import { ClientWrapper } from './client'
-import { globals } from '..'
 
 export class SSMWrapper extends ClientWrapper<SSM> {
     public constructor(public override readonly regionCode: string) {
@@ -16,7 +32,6 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     }
 
     public async terminateSession(session: Session): Promise<TerminateSessionResponse> {
-        //const c = await globals.sdkClientBuilderV3.createAwsService(SSMClient, undefined, 'us-west-1')
         const sessionId = session.SessionId!
         return await this.terminateSessionFromId(sessionId)
     }
@@ -31,20 +46,27 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     public async startSession(
         target: string,
         document?: string,
-        parameters?: SSM.SessionManagerParameters
-    ): Promise<SSM.StartSessionResponse> {
-        const client = await this.createSdkClient()
-        const response = await client
-            .startSession({ Target: target, DocumentName: document, Parameters: parameters })
-            .promise()
+        reason?: string,
+        parameters?: Record<string, string[]>
+    ): Promise<StartSessionCommandOutput> {
+        const client = await this.getClient()
+        const command = new StartSessionCommand({
+            Target: target,
+            DocumentName: document,
+            Parameters: parameters,
+            Reason: reason,
+        })
+        const response = await client.send(command)
         return response
     }
 
-    public async describeInstance(target: string): Promise<SSM.InstanceInformation> {
-        const client = await this.createSdkClient()
-        const requester = async (req: SSM.DescribeInstanceInformationRequest) =>
-            client.describeInstanceInformation(req).promise()
-        const request: SSM.DescribeInstanceInformationRequest = {
+    public async describeInstance(target: string): Promise<InstanceInformation> {
+        const client = await this.getClient()
+        const requester = async (req: DescribeInstanceInformationCommandInput) => {
+            const command = new DescribeInstanceInformationCommand(req)
+            return await client.send(command)
+        }
+        const request: DescribeInstanceInformationCommandInput = {
             InstanceInformationFilterList: [
                 {
                     key: 'InstanceIds',
@@ -68,28 +90,37 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     public async sendCommand(
         target: string,
         documentName: string,
-        parameters: SSM.Parameters
-    ): Promise<SSM.SendCommandResult> {
-        const client = await this.createSdkClient()
-        const response = await client
-            .sendCommand({ InstanceIds: [target], DocumentName: documentName, Parameters: parameters })
-            .promise()
+        parameters: Record<string, string[]>
+    ): Promise<SendCommandCommandOutput> {
+        const client = await this.getClient()
+        const command = new SendCommandCommand({
+            InstanceIds: [target],
+            DocumentName: documentName,
+            Parameters: parameters,
+        })
+        const response = await client.send(command)
         return response
+    }
+
+    private async waitUntilCommandExecuted(commandId: string, target: string) {
+        const result = await waitUntilCommandExecuted(
+            { client: await this.getClient(), maxWaitTime: 30 },
+            { CommandId: commandId, InstanceId: target }
+        )
+        if (result.state !== 'SUCCESS') {
+            throw new ToolkitError(`Command ${commandId} failed to execute on target ${target}`)
+        }
     }
 
     public async sendCommandAndWait(
         target: string,
         documentName: string,
-        parameters: SSM.Parameters
-    ): Promise<PromiseResult<SSM.GetCommandInvocationResult, AWSError>> {
+        parameters: Record<string, string[]>
+    ): Promise<SendCommandCommandOutput> {
         const response = await this.sendCommand(target, documentName, parameters)
-        const client = await this.createSdkClient()
         try {
-            const commandId = response.Command!.CommandId!
-            const result = await client
-                .waitFor('commandExecuted', { CommandId: commandId, InstanceId: target })
-                .promise()
-            return result
+            await this.waitUntilCommandExecuted(response.Command!.CommandId!, target)
+            return response
         } catch (err) {
             throw new ToolkitError(`Failed in sending command to target ${target}`, { cause: err as Error })
         }
@@ -100,11 +131,19 @@ export class SSMWrapper extends ClientWrapper<SSM> {
         return instanceInformation ? instanceInformation.PingStatus! : 'Inactive'
     }
 
-    public async describeSessions(state: SSM.SessionState) {
-        const client = await this.createSdkClient()
-        const requester = async (req: SSM.DescribeSessionsRequest) => client.describeSessions(req).promise()
+    public async describeSessions(state: SessionState) {
+        const client = await this.getClient()
+        const requester = async (req: DescribeSessionsCommandInput) => {
+            const command = new DescribeSessionsCommand(req)
+            return await client.send(command)
+        }
 
-        const response = await pageableToCollection(requester, { State: state }, 'NextToken', 'Sessions').promise()
+        const response = await pageableToCollection(
+            requester,
+            { State: state },
+            'NextToken' as never,
+            'Sessions'
+        ).promise()
 
         return response
     }

@@ -27,8 +27,9 @@ import { omitIfPresent } from './utilities/tsUtils'
 
 export type AwsClientConstructor<C> = new (o: AwsClientOptions) => C
 
-interface AwsClient {
+export interface AwsClient {
     middlewareStack: any // Ideally this would extends MiddlewareStack<Input, Output>, but this causes issues on client construction.
+    destroy: () => void
 }
 
 interface AwsConfigOptions {
