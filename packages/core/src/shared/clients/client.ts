@@ -5,6 +5,7 @@
 import * as vscode from 'vscode'
 import globals from '../extensionGlobals'
 import { AwsClient, AwsClientConstructor } from '../awsClientBuilderV3'
+import { pageableToCollection } from '../utilities/collectionUtils'
 
 export abstract class ClientWrapper<C extends AwsClient> implements vscode.Disposable {
     protected client: C | undefined
@@ -22,12 +23,28 @@ export abstract class ClientWrapper<C extends AwsClient> implements vscode.Dispo
         return this.client!
     }
 
-    protected async makeRequest<Options extends object, Command extends object>(
-        command: new (o: Options) => Command,
-        commandOptions: Options
+    protected async makeRequest<CommandInput extends object, Command extends object>(
+        command: new (o: CommandInput) => Command,
+        commandOptions: CommandInput
     ) {
         const client = await this.getClient()
         return await client.send(new command(commandOptions))
+    }
+
+    protected makePaginatedRequest<CommandInput extends object, CommandOutput extends object, Command extends object>(
+        command: new (o: CommandInput) => Command,
+        commandOptions: CommandInput,
+        collectKey: keyof CommandOutput & string,
+        nextTokenKey?: keyof CommandOutput & keyof CommandInput & string
+    ) {
+        const requester = async (req: CommandInput) => await this.makeRequest(command, req)
+        const response = pageableToCollection(
+            requester,
+            commandOptions,
+            nextTokenKey ?? ('NextToken' as never),
+            collectKey
+        )
+        return response
     }
 
     public dispose() {

@@ -19,10 +19,8 @@ import {
     waitUntilCommandExecuted,
     SessionState,
     DescribeSessionsCommand,
-    DescribeSessionsCommandInput,
 } from '@aws-sdk/client-ssm'
 import { WaiterState } from '@smithy/util-waiter'
-import { pageableToCollection } from '../utilities/collectionUtils'
 import { ToolkitError } from '../errors'
 import { ClientWrapper } from './client'
 
@@ -55,25 +53,20 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     }
 
     public async describeInstance(target: string): Promise<InstanceInformation> {
-        const client = await this.getClient()
-        const requester = async (req: DescribeInstanceInformationCommandInput) => {
-            const command = new DescribeInstanceInformationCommand(req)
-            return await client.send(command)
-        }
-        const request: DescribeInstanceInformationCommandInput = {
-            InstanceInformationFilterList: [
-                {
-                    key: 'InstanceIds',
-                    valueSet: [target],
-                },
-            ],
-        }
-
-        const response = await pageableToCollection(requester, request, 'NextToken', 'InstanceInformationList')
-            .flatten()
-            .flatten()
-            .promise()
-        return response[0]!
+        const response2 = this.makePaginatedRequest(
+            DescribeInstanceInformationCommand,
+            {
+                InstanceInformationFilterList: [
+                    {
+                        key: 'InstanceIds',
+                        valueSet: [target],
+                    },
+                ],
+            } as DescribeInstanceInformationCommandInput,
+            'InstanceIds'
+        )
+        const resolvedResponse = await response2.flatten().flatten().promise()
+        return resolvedResponse[0]!
     }
 
     public async getTargetPlatformName(target: string): Promise<string> {
@@ -123,19 +116,6 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     }
 
     public async describeSessions(state: SessionState) {
-        const client = await this.getClient()
-        const requester = async (req: DescribeSessionsCommandInput) => {
-            const command = new DescribeSessionsCommand(req)
-            return await client.send(command)
-        }
-
-        const response = await pageableToCollection(
-            requester,
-            { State: state },
-            'NextToken' as never,
-            'Sessions'
-        ).promise()
-
-        return response
+        return await this.makePaginatedRequest(DescribeSessionsCommand, { State: state }, 'Sessions').promise()
     }
 }
