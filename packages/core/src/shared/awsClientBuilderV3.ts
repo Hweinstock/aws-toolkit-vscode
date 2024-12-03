@@ -30,7 +30,10 @@ export type AwsClientConstructor<C> = new (o: AwsClientOptions) => C
 export interface AwsClient {
     middlewareStack: any // Ideally this would extends MiddlewareStack<Input, Output>, but this causes issues on client construction.
     destroy: () => void
+    send: any
 }
+
+export interface AwsSdkCommand {}
 
 interface AwsConfigOptions {
     credentials: AwsCredentialIdentityProvider

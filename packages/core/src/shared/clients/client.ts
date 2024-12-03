@@ -22,6 +22,14 @@ export abstract class ClientWrapper<C extends AwsClient> implements vscode.Dispo
         return this.client!
     }
 
+    protected async makeRequest<Options extends object, Command extends object>(
+        command: new (o: Options) => Command,
+        commandOptions: Options
+    ) {
+        const client = await this.getClient()
+        return await client.send(new command(commandOptions))
+    }
+
     public dispose() {
         this.client?.destroy()
     }

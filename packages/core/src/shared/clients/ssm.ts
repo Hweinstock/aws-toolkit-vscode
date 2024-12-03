@@ -16,12 +16,12 @@ import {
     InstanceInformation,
     SendCommandCommand,
     SendCommandCommandOutput,
-    waitForCommandExecuted,
     waitUntilCommandExecuted,
     SessionState,
     DescribeSessionsCommand,
     DescribeSessionsCommandInput,
 } from '@aws-sdk/client-ssm'
+import { WaiterState } from '@smithy/util-waiter'
 import { pageableToCollection } from '../utilities/collectionUtils'
 import { ToolkitError } from '../errors'
 import { ClientWrapper } from './client'
@@ -37,10 +37,7 @@ export class SSMWrapper extends ClientWrapper<SSM> {
     }
 
     public async terminateSessionFromId(sessionId: string): Promise<TerminateSessionResponse> {
-        const client = await this.getClient()
-        const command = new TerminateSessionCommand({ SessionId: sessionId })
-        const termination = await client.send(command)
-        return termination!
+        return await this.makeRequest(TerminateSessionCommand, { SessionId: sessionId })
     }
 
     public async startSession(
@@ -49,15 +46,12 @@ export class SSMWrapper extends ClientWrapper<SSM> {
         reason?: string,
         parameters?: Record<string, string[]>
     ): Promise<StartSessionCommandOutput> {
-        const client = await this.getClient()
-        const command = new StartSessionCommand({
+        return await this.makeRequest(StartSessionCommand, {
             Target: target,
             DocumentName: document,
-            Parameters: parameters,
             Reason: reason,
+            Parameters: parameters,
         })
-        const response = await client.send(command)
-        return response
     }
 
     public async describeInstance(target: string): Promise<InstanceInformation> {
@@ -92,14 +86,11 @@ export class SSMWrapper extends ClientWrapper<SSM> {
         documentName: string,
         parameters: Record<string, string[]>
     ): Promise<SendCommandCommandOutput> {
-        const client = await this.getClient()
-        const command = new SendCommandCommand({
+        return await this.makeRequest(SendCommandCommand, {
             InstanceIds: [target],
             DocumentName: documentName,
             Parameters: parameters,
         })
-        const response = await client.send(command)
-        return response
     }
 
     private async waitUntilCommandExecuted(commandId: string, target: string) {
@@ -107,7 +98,7 @@ export class SSMWrapper extends ClientWrapper<SSM> {
             { client: await this.getClient(), maxWaitTime: 30 },
             { CommandId: commandId, InstanceId: target }
         )
-        if (result.state !== 'SUCCESS') {
+        if (result.state !== WaiterState.SUCCESS) {
             throw new ToolkitError(`Command ${commandId} failed to execute on target ${target}`)
         }
     }
