@@ -730,8 +730,8 @@ describe('CollectionUtils', async function () {
                 d: {},
                 e: {},
             })
-            assert.deepStrictEqual(partialClone(testObj, 0, [], '[replaced]'), '[replaced]')
-            assert.deepStrictEqual(partialClone(testObj, 1, [], '[replaced]'), {
+            assert.deepStrictEqual(partialClone(testObj, 0, [], { replacement: '[omitted]' }), '[replaced]')
+            assert.deepStrictEqual(partialClone(testObj, 1, [], { replacement: '[omitted]' }), {
                 ...testObj,
                 d: '[replaced]',
                 e: '[replaced]',
@@ -758,7 +758,7 @@ describe('CollectionUtils', async function () {
                 },
             }
 
-            assert.deepStrictEqual(partialClone(testObj, 2, ['c', 'e2'], '[omitted]'), {
+            assert.deepStrictEqual(partialClone(testObj, 2, ['c', 'e2'], { replacement: '[omitted]' }), {
                 ...testObj,
                 c: '[omitted]',
                 d: { d1: '[omitted]' },
@@ -767,13 +767,38 @@ describe('CollectionUtils', async function () {
                     e2: '[omitted]',
                 },
             })
-            assert.deepStrictEqual(partialClone(testObj, 3, ['c', 'e2'], '[omitted]'), {
+            assert.deepStrictEqual(partialClone(testObj, 3, ['c', 'e2'], { replacement: '[omitted]' }), {
                 ...testObj,
                 c: '[omitted]',
                 d: { d1: { d2: '[omitted]' } },
                 e: {
                     e1: [4, 3, 7],
                     e2: '[omitted]',
+                },
+            })
+        })
+
+        it('truncates properties by maxLength', function () {
+            const testObj = {
+                a: '1',
+                b: '11',
+                c: '11111',
+                d: {
+                    e: {
+                        a: '11111',
+                        b: '11',
+                    },
+                },
+            }
+            assert.deepStrictEqual(partialClone(testObj, 5, [], { maxLength: 2 }), {
+                a: '1',
+                b: '11',
+                c: '11...',
+                d: {
+                    e: {
+                        a: '11...',
+                        b: '11',
+                    },
                 },
             })
         })
