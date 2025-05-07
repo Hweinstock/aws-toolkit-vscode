@@ -27,6 +27,7 @@ import {
     Experiments,
 } from 'aws-core-vscode/shared'
 import { InlineLineAnnotationController } from '../decorations/inlineLineAnnotationController'
+import { InlineChatResult } from '@aws/language-server-runtimes-types'
 
 export class InlineChatController {
     private task: InlineTask | undefined
@@ -224,6 +225,53 @@ export class InlineChatController {
             })
     }
 
+    private async renderPartialDiff(result: InlineChatResult) {
+        if (!result.body) {
+            getLogger().warn('Recived empty body response, ignoring')
+            return
+        }
+        if (!this.task) {
+            getLogger().warn('No active task')
+            return
+        }
+        getLogger().info('Logging partial result %O', result)
+        const textDiff = computeDiff(result.body, this.task, true)
+        const decorations = computeDecorations(this.task)
+        this.task.decorations = decorations
+        await this.applyDiff(this.task!, textDiff ?? [], {
+            undoStopBefore: false,
+            undoStopAfter: false,
+        })
+        this.decorator.applyDecorations(this.task)
+        this.task.previouseDiff = textDiff
+    }
+
+    private async renderCompleteDiff(result: InlineChatResult) {
+        // TODO: add tests for this case.
+        if (!result.body) {
+            getLogger().warn('Empty body in inline chat response')
+            await this.handleError()
+            return
+        }
+
+        if (!this.task) {
+            getLogger().warn('No active task')
+            return
+        }
+
+        // Update inline diff view
+        const textDiff = computeDiff(result.body, this.task, false)
+        const decorations = computeDecorations(this.task)
+        this.task.decorations = decorations
+        await this.applyDiff(this.task, textDiff ?? [])
+        this.decorator.applyDecorations(this.task)
+
+        // Update Codelenses
+        await this.updateTaskAndLenses(this.task, TaskState.WaitingForDecision)
+        await setContext('amazonq.inline.codelensShortcutEnabled', true)
+        this.undoListener(this.task)
+    }
+
     private async computeDiffAndRenderOnEditorLSP(query: string) {
         if (!this.task) {
             return
@@ -240,26 +288,12 @@ export class InlineChatController {
             tabID: uuid,
         }
 
-        const response = await this.inlineChatProvider.processPromptMessageLSP(message)
+        const response = await this.inlineChatProvider.processPromptMessageLSP(
+            message,
+            this.renderPartialDiff.bind(this)
+        )
 
-        // TODO: add tests for this case.
-        if (!response.body) {
-            getLogger().warn('Empty body in inline chat response')
-            await this.handleError()
-            return
-        }
-
-        // Update inline diff view
-        const textDiff = computeDiff(response.body, this.task, false)
-        const decorations = computeDecorations(this.task)
-        this.task.decorations = decorations
-        await this.applyDiff(this.task, textDiff ?? [])
-        this.decorator.applyDecorations(this.task)
-
-        // Update Codelenses
-        await this.updateTaskAndLenses(this.task, TaskState.WaitingForDecision)
-        await setContext('amazonq.inline.codelensShortcutEnabled', true)
-        this.undoListener(this.task)
+        await this.renderCompleteDiff(response)
     }
 
     // TODO: remove this implementation in favor of LSP

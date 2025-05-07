@@ -30,6 +30,7 @@ import { extractAuthFollowUp } from 'aws-core-vscode/amazonq'
 import { InlineChatParams, InlineChatResult } from '@aws/language-server-runtimes-types'
 import { decryptResponse, encryptRequest } from '../../lsp/encryption'
 import { getCursorState } from '../../lsp/utils'
+import { v4 as uuidv4 } from 'uuid'
 
 export class InlineChatProvider {
     private readonly editorContextExtractor: EditorContextExtractor
@@ -68,13 +69,22 @@ export class InlineChatProvider {
         }
     }
 
-    public async processPromptMessageLSP(message: PromptMessage): Promise<InlineChatResult> {
+    public async processPromptMessageLSP(
+        message: PromptMessage,
+        onPartialResponse: (partialResponse: InlineChatResult) => Promise<void>
+    ): Promise<InlineChatResult> {
         // TODO: handle partial responses.
         getLogger().info('Making inline chat request with message %O', message)
         const params = this.getCurrentEditorParams(message.message ?? '')
-
+        const partialResultToken = uuidv4()
+        this.client.onProgress(inlineChatRequestType, partialResultToken, (partialResult) =>
+            decryptResponse<InlineChatResult>(partialResult, this.encryptionKey).then(onPartialResponse)
+        )
         const inlineChatRequest = await encryptRequest<InlineChatParams>(params, this.encryptionKey)
-        const response = await this.client.sendRequest(inlineChatRequestType.method, inlineChatRequest)
+        const response = await this.client.sendRequest(inlineChatRequestType.method, {
+            ...inlineChatRequest,
+            partialResultToken,
+        })
         const inlineChatResponse = await decryptResponse<InlineChatResult>(response, this.encryptionKey)
         this.client.info(`Logging response for inline chat ${JSON.stringify(inlineChatResponse)}`)
 
