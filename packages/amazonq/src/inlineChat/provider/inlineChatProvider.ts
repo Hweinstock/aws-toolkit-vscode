@@ -71,7 +71,7 @@ export class InlineChatProvider {
 
     public async processPromptMessageLSP(
         message: PromptMessage,
-        onPartialResponse: (partialResponse: InlineChatResult) => Promise<void>
+        onPartialResponse: (partialResponse: InlineChatResult) => Promise<boolean>
     ): Promise<InlineChatResult> {
         // TODO: handle partial responses.
         getLogger().info('Making inline chat request with message %O', message)

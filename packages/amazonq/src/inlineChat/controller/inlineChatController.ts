@@ -6,9 +6,9 @@ import { randomUUID } from 'crypto'
 import * as vscode from 'vscode'
 import { InlineDecorator } from '../decorations/inlineDecorator'
 import { InlineChatProvider } from '../provider/inlineChatProvider'
-import { InlineTask, TaskState, TextDiff } from './inlineTask'
+import { InlineTask, TaskState } from './inlineTask'
 import { responseTransformer } from '../output/responseTransformer'
-import { adjustTextDiffForEditing, computeDiff } from '../output/computeDiff'
+import { computeDiff } from '../output/computeDiff'
 import { computeDecorations } from '../decorations/computeDecorations'
 import { CodelensProvider } from '../codeLenses/codeLenseProvider'
 import { PromptMessage, ReferenceLogController } from 'aws-core-vscode/codewhispererChat'
@@ -27,7 +27,7 @@ import {
     Experiments,
 } from 'aws-core-vscode/shared'
 import { InlineLineAnnotationController } from '../decorations/inlineLineAnnotationController'
-import { InlineChatResult } from '@aws/language-server-runtimes-types'
+import { applyDiff, renderCompleteDiff, renderPartialDiff } from './inlineChatRenderer'
 
 export class InlineChatController {
     private task: InlineTask | undefined
@@ -225,59 +225,14 @@ export class InlineChatController {
             })
     }
 
-    private async renderPartialDiff(result: InlineChatResult) {
-        if (!result.body) {
-            getLogger().warn('Recived empty body response, ignoring')
-            return
-        }
-        if (!this.task) {
-            getLogger().warn('No active task')
-            return
-        }
-        getLogger().info('Logging partial result %O', result)
-        const textDiff = computeDiff(result.body, this.task, true)
-        const decorations = computeDecorations(this.task)
-        this.task.decorations = decorations
-        await this.applyDiff(this.task!, textDiff ?? [], {
-            undoStopBefore: false,
-            undoStopAfter: false,
-        })
-        this.decorator.applyDecorations(this.task)
-        this.task.previouseDiff = textDiff
-    }
-
-    private async renderCompleteDiff(result: InlineChatResult) {
-        // TODO: add tests for this case.
-        if (!result.body) {
-            getLogger().warn('Empty body in inline chat response')
-            await this.handleError()
-            return
-        }
-
-        if (!this.task) {
-            getLogger().warn('No active task')
-            return
-        }
-
-        // Update inline diff view
-        const textDiff = computeDiff(result.body, this.task, false)
-        const decorations = computeDecorations(this.task)
-        this.task.decorations = decorations
-        await this.applyDiff(this.task, textDiff ?? [])
-        this.decorator.applyDecorations(this.task)
-
-        // Update Codelenses
-        await this.updateTaskAndLenses(this.task, TaskState.WaitingForDecision)
-        await setContext('amazonq.inline.codelensShortcutEnabled', true)
-        this.undoListener(this.task)
-    }
-
     private async computeDiffAndRenderOnEditorLSP(query: string) {
         if (!this.task) {
             return
         }
+        const activeTask = this.task
+        const activeDecorator = this.decorator
 
-        await this.updateTaskAndLenses(this.task, TaskState.InProgress)
+        await this.updateTaskAndLenses(activeTask, TaskState.InProgress)
         getLogger().info(`inline chat query:\n${query}`)
         const uuid = randomUUID()
         const message: PromptMessage = {
@@ -288,12 +243,19 @@ export class InlineChatController {
             tabID: uuid,
         }
 
-        const response = await this.inlineChatProvider.processPromptMessageLSP(
-            message,
-            this.renderPartialDiff.bind(this)
+        const response = await this.inlineChatProvider.processPromptMessageLSP(message, (result) =>
+            renderPartialDiff(result, activeTask, activeDecorator)
         )
 
-        await this.renderCompleteDiff(response)
+        const didRender = await renderCompleteDiff(response, activeTask, activeDecorator)
+        if (!didRender) {
+            await this.handleError()
+        }
+
+        // Update Codelenses
+        await this.updateTaskAndLenses(activeTask, TaskState.WaitingForDecision)
+        await setContext('amazonq.inline.codelensShortcutEnabled', true)
+        this.undoListener(activeTask)
     }
 
     // TODO: remove this implementation in favor of LSP
@@ -348,7 +310,7 @@ export class InlineChatController {
                         const textDiff = computeDiff(transformedResponse, this.task, true)
                         const decorations = computeDecorations(this.task)
                         this.task.decorations = decorations
-                        await this.applyDiff(this.task!, textDiff ?? [], {
+                        await applyDiff(this.task!, textDiff ?? [], {
                             undoStopBefore: false,
                             undoStopAfter: false,
                         })
@@ -391,7 +353,7 @@ export class InlineChatController {
                 const textDiff = computeDiff(transformedResponse, this.task, false)
                 const decorations = computeDecorations(this.task)
                 this.task.decorations = decorations
-                await this.applyDiff(this.task, textDiff ?? [])
+                await applyDiff(this.task, textDiff ?? [])
                 this.decorator.applyDecorations(this.task)
                 await this.updateTaskAndLenses(this.task, TaskState.WaitingForDecision)
                 await setContext('amazonq.inline.codelensShortcutEnabled', true)
@@ -405,56 +367,6 @@ export class InlineChatController {
                 await this.inlineQuickPick(this.userQuery)
                 await this.handleError()
             }
-        }
-    }
-
-    private async applyDiff(
-        task: InlineTask,
-        textDiff: TextDiff[],
-        undoOption?: { undoStopBefore: boolean; undoStopAfter: boolean }
-    ) {
-        const adjustedTextDiff = adjustTextDiffForEditing(textDiff)
-        const visibleEditor = vscode.window.visibleTextEditors.find(
-            (editor) => editor.document.uri === task.document.uri
-        )
-        const previousDiff = task.previouseDiff?.filter((diff) => diff.type === 'insertion')
-
-        if (visibleEditor) {
-            if (previousDiff) {
-                await visibleEditor.edit(
-                    (editBuilder) => {
-                        for (const insertion of previousDiff) {
-                            editBuilder.delete(insertion.range)
-                        }
-                    },
-                    { undoStopAfter: false, undoStopBefore: false }
-                )
-            }
-            await visibleEditor.edit(
-                (editBuilder) => {
-                    for (const change of adjustedTextDiff) {
-                        if (change.type === 'insertion') {
-                            editBuilder.insert(change.range.start, change.replacementText)
-                        }
-                    }
-                },
-                undoOption ?? { undoStopBefore: true, undoStopAfter: false }
-            )
-        } else {
-            if (previousDiff) {
-                const edit = new vscode.WorkspaceEdit()
-                for (const insertion of previousDiff) {
-                    edit.delete(task.document.uri, insertion.range)
-                }
-                await vscode.workspace.applyEdit(edit)
-            }
-            const edit = new vscode.WorkspaceEdit()
-            for (const change of textDiff) {
-                if (change.type === 'insertion') {
-                    edit.insert(task.document.uri, change.range.start, change.replacementText)
-                }
-            }
-            await vscode.workspace.applyEdit(edit)
         }
     }
 
