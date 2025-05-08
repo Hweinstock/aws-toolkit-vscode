@@ -73,13 +73,25 @@ export class InlineChatProvider {
         message: PromptMessage,
         onPartialResponse: (partialResponse: InlineChatResult) => Promise<boolean>
     ): Promise<InlineChatResult> {
-        // TODO: handle partial responses.
         getLogger().info('Making inline chat request with message %O', message)
         const params = this.getCurrentEditorParams(message.message ?? '')
+
+        // TODO: avoid duplicating this
+        // Deselect all code
+        const editor = vscode.window.activeTextEditor
+        if (editor) {
+            const selection = editor.selection
+            if (!selection.isEmpty) {
+                const cursor = selection.active
+                const newSelection = new vscode.Selection(cursor, cursor)
+                editor.selection = newSelection
+            }
+        }
+
         const partialResultToken = uuidv4()
-        this.client.onProgress(inlineChatRequestType, partialResultToken, (partialResult) =>
+        const progressListener = this.client.onProgress(inlineChatRequestType, partialResultToken, (partialResult) => {
             decryptResponse<InlineChatResult>(partialResult, this.encryptionKey).then(onPartialResponse)
-        )
+        })
         const inlineChatRequest = await encryptRequest<InlineChatParams>(params, this.encryptionKey)
         const response = await this.client.sendRequest(inlineChatRequestType.method, {
             ...inlineChatRequest,
@@ -87,6 +99,8 @@ export class InlineChatProvider {
         })
         const inlineChatResponse = await decryptResponse<InlineChatResult>(response, this.encryptionKey)
         this.client.info(`Logging response for inline chat ${JSON.stringify(inlineChatResponse)}`)
+
+        progressListener.dispose()
 
         return inlineChatResponse
     }

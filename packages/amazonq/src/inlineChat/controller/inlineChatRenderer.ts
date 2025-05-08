@@ -9,6 +9,7 @@ import { InlineChatResult } from '@aws/language-server-runtimes-types'
 import { InlineDecorator } from '../decorations/inlineDecorator'
 import { getLogger } from 'aws-core-vscode/shared'
 import { computeDecorations } from '../decorations/computeDecorations'
+import { responseTransformer } from '../output/responseTransformer'
 
 export async function applyDiff(
     task: InlineTask,
@@ -58,44 +59,28 @@ export async function applyDiff(
     }
 }
 
-export async function renderPartialDiff(
+export async function renderDiff(
     result: InlineChatResult,
     activeTask: InlineTask,
-    decorator: InlineDecorator
+    decorator: InlineDecorator,
+    isPartial: boolean
 ): Promise<boolean> {
     if (!result.body) {
-        getLogger().warn('Recived empty body response, skipping partial diff')
+        getLogger().warn('Recived empty body response, skipping diff')
         return false
     }
-    getLogger().info('Logging partial result %O', result)
-    const textDiff = computeDiff(result.body, activeTask, true)
+    const response = responseTransformer(result.body, activeTask, !isPartial, false)
+    if (!response) {
+        getLogger().warn('Recived empty response, skipping diff')
+        return false
+    }
+    const textDiff = computeDiff(response, activeTask, isPartial)
     const decorations = computeDecorations(activeTask)
     activeTask.decorations = decorations
-    await applyDiff(activeTask, textDiff ?? [], {
-        undoStopBefore: false,
-        undoStopAfter: false,
-    })
+    await (isPartial
+        ? applyDiff(activeTask, textDiff ?? [], { undoStopAfter: false, undoStopBefore: false })
+        : applyDiff(activeTask, textDiff ?? []))
     decorator.applyDecorations(activeTask)
     activeTask.previouseDiff = textDiff
-    return true
-}
-
-export async function renderCompleteDiff(
-    result: InlineChatResult,
-    activeTask: InlineTask,
-    decorator: InlineDecorator
-): Promise<boolean> {
-    // TODO: add tests for this case.
-    if (!result.body) {
-        getLogger().warn('Empty body in inline chat response')
-        return false
-    }
-
-    // Update inline diff view
-    const textDiff = computeDiff(result.body, activeTask, false)
-    const decorations = computeDecorations(activeTask)
-    activeTask.decorations = decorations
-    await applyDiff(activeTask, textDiff ?? [])
-    decorator.applyDecorations(activeTask)
     return true
 }

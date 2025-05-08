@@ -27,7 +27,7 @@ import {
     Experiments,
 } from 'aws-core-vscode/shared'
 import { InlineLineAnnotationController } from '../decorations/inlineLineAnnotationController'
-import { applyDiff, renderCompleteDiff, renderPartialDiff } from './inlineChatRenderer'
+import { applyDiff, renderDiff } from './inlineChatRenderer'
 
 export class InlineChatController {
     private task: InlineTask | undefined
@@ -244,10 +244,10 @@ export class InlineChatController {
         }
 
         const response = await this.inlineChatProvider.processPromptMessageLSP(message, (result) =>
-            renderPartialDiff(result, activeTask, activeDecorator)
+            renderDiff(result, activeTask, activeDecorator, true)
         )
 
-        const didRender = await renderCompleteDiff(response, activeTask, activeDecorator)
+        const didRender = await renderDiff(response, activeTask, activeDecorator, false)
         if (!didRender) {
             await this.handleError()
         }
@@ -305,7 +305,7 @@ export class InlineChatController {
 
                     qSuggestedCodeResponse += chatEvent.assistantResponseEvent.content
 
-                    const transformedResponse = responseTransformer(qSuggestedCodeResponse, this.task, false)
+                    const transformedResponse = responseTransformer(qSuggestedCodeResponse, this.task, false, true)
                     if (transformedResponse) {
                         const textDiff = computeDiff(transformedResponse, this.task, true)
                         const decorations = computeDecorations(this.task)
@@ -348,7 +348,7 @@ export class InlineChatController {
                 this.task.responseEndLatency = performance.now() - requestStart
             }
             getLogger().info(`qSuggestedCodeResponse:\n${qSuggestedCodeResponse}`)
-            const transformedResponse = responseTransformer(qSuggestedCodeResponse, this.task, true)
+            const transformedResponse = responseTransformer(qSuggestedCodeResponse, this.task, true, true)
             if (transformedResponse) {
                 const textDiff = computeDiff(transformedResponse, this.task, false)
                 const decorations = computeDecorations(this.task)

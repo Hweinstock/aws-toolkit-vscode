@@ -18,10 +18,11 @@ import { InlineTask } from '../controller/inlineTask'
 export function responseTransformer(
     response: string,
     inlineTask: InlineTask,
-    isWholeResponse: boolean
+    isWholeResponse: boolean,
+    isEncoded: boolean
 ): string | undefined {
     try {
-        const decodedResponse = decode(response)
+        const decodedResponse = isEncoded ? decode(response) : response
         if (!isWholeResponse) {
             const [partialSelectedCode, right] = extractPartialCode(decodedResponse, inlineTask)
             inlineTask.partialSelectedText = partialSelectedCode
